@@ -62,14 +62,14 @@ export default function ClientPage({ slug }: { slug: string }) {
   // Show either partial or final data
   const events = eventData?.events?.items;
 
-  // Only submit once
+  // Only submit once and only if we have Wikipedia data
   useEffect(() => {
-    if (!hasRequested) {
+    if (!hasRequested && wikiData) {
       const name = decodeURIComponent(slug);
       submit({ prompt: name });
       setHasRequested(true);
     }
-  }, [slug, submit, hasRequested]);
+  }, [slug, submit, hasRequested, wikiData]);
 
   // Load Wikipedia data
   useEffect(() => {
@@ -98,7 +98,20 @@ export default function ClientPage({ slug }: { slug: string }) {
   }, [wikiData, eventData, isLoading, error]);
 
   if (!wikiData) {
-    return <div>Loading Wikipedia data...</div>;
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <nav className="mb-8 flex items-center justify-between">
+          <Link
+            href="/"
+            className="flex items-center text-lg hover:text-blue-500 transition-colors"
+          >
+            <span className="mr-2">←</span>
+            Back to Search
+          </Link>
+        </nav>
+        <div>No Wikipedia information found for this person.</div>
+      </div>
+    );
   }
 
   return (
@@ -120,7 +133,9 @@ export default function ClientPage({ slug }: { slug: string }) {
         {/* Left side: Events */}
         <div className="space-y-4">
           <h2 className="text-2xl font-bold mb-4">Life Events</h2>
-          {isLoading && <div>Generating events...</div>}
+          {isLoading && (
+            <div>Generating events... (this may take a minute)</div>
+          )}
           {error && <div>Error: {error.message}</div>}
           <div className="space-y-4">
             {events?.map((event, i) => (
