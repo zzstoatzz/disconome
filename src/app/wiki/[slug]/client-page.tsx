@@ -4,6 +4,7 @@ import { experimental_useObject as useObject } from "ai/react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { z } from "zod";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 
 const schema = z.object({
   events: z.object({
@@ -154,8 +155,9 @@ export default function ClientPage({ slug }: { slug: string }) {
             Timeline
           </h2>
           {isLoading && (
-            <div className="text-gray-900 dark:text-white">
-              Generating events... (this may take a minute)
+            <div className="flex items-center space-x-3 text-gray-900 dark:text-white">
+              <LoadingSpinner />
+              <span>Generating timeline... (this may take a minute)</span>
             </div>
           )}
           {error && (

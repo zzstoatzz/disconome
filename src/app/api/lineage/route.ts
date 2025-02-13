@@ -4,6 +4,7 @@ import { openai } from "@ai-sdk/openai";
 import { streamObject } from "ai";
 import { z } from "zod";
 import { put, list } from "@vercel/blob";
+import { createHash } from "crypto";
 
 const schema = z.object({
   events: z.object({
@@ -24,21 +25,29 @@ export async function POST(req: Request) {
     const { prompt, wikiContent } = await req.json();
     console.log("📥 Processing request for:", prompt);
 
-    // Check blob storage first
-    const blobPath = `events/${prompt.toLowerCase().replace(/\s+/g, "-")}.json`;
+    const contentHash = createHash("sha256")
+      .update(prompt + wikiContent)
+      .digest("hex")
+      .slice(0, 10);
+
+    const blobPath = `events/${prompt.toLowerCase().replace(/\s+/g, "-")}-${contentHash}.json`;
     const blobs = await list({ prefix: blobPath });
 
     if (blobs.blobs.length > 0) {
       console.log("📦 Found cached data");
       const response = await fetch(blobs.blobs[0].url);
       const data = await response.json();
-      return new Response(JSON.stringify(data));
+      return new Response(JSON.stringify(data), {
+        headers: {
+          "x-cache": "HIT",
+        },
+      });
     }
 
     // Generate new data if not found
     console.log("🤖 Generating new data");
     const result = await streamObject({
-      model: openai("gpt-4"),
+      model: openai("gpt-4o"),
       system: `You are helping create a chronological timeline of significant events. 
               Use the provided Wikipedia content as the source of truth.
               Only include events that are mentioned in the Wikipedia content.
@@ -66,7 +75,12 @@ If there aren't enough explicit events, you can include fewer than 5 events.`,
       });
     });
 
-    return response;
+    return new Response(response.body, {
+      headers: {
+        ...response.headers,
+        "x-cache": "MISS",
+      },
+    });
   } catch (error) {
     console.error("❌ Error:", error);
     return new Response(JSON.stringify({ error: String(error) }), {
