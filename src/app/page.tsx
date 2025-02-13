@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { SearchSuggestions } from "@/components/SearchSuggestions";
+import Link from "next/link";
 
 const SAMPLE_SUGGESTIONS = [
   "Albert Einstein",
@@ -17,12 +18,19 @@ const SAMPLE_SUGGESTIONS = [
   "Artificial Intelligence",
 ];
 
+interface LeaderboardEntry {
+  slug: string;
+  title: string;
+  count: number;
+}
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +61,19 @@ export default function Home() {
     const slug = suggestion.toLowerCase().replace(/\s+/g, "-");
     router.push(`/wiki/${slug}`);
   };
+
+  useEffect(() => {
+    fetch("/api/track-visit")
+      .then((res) => res.json())
+      .then((data) => {
+        setLeaderboard(data);
+        setIsLoading(false);
+      })
+      .catch((error) => {
+        console.error("Error fetching leaderboard:", error);
+        setIsLoading(false);
+      });
+  }, []);
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
@@ -86,6 +107,36 @@ export default function Home() {
           suggestions={suggestions}
           onSelect={handleSuggestionSelect}
         />
+      </div>
+
+      {/* Leaderboard Section */}
+      <div className="mt-12">
+        <h2 className="text-2xl font-bold mb-4">Most Viewed Entities</h2>
+        {isLoading ? (
+          <div className="text-gray-600">Loading trending entities...</div>
+        ) : leaderboard.length > 0 ? (
+          <div className="space-y-2">
+            {leaderboard.map((entry, index) => (
+              <Link
+                key={entry.slug}
+                href={`/wiki/${entry.slug}`}
+                className="flex items-center p-3 bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow"
+              >
+                <span className="text-2xl font-bold text-gray-400 w-12">
+                  #{index + 1}
+                </span>
+                <div className="flex-grow">
+                  <h3 className="font-semibold">{entry.title}</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {entry.count} views
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="text-gray-600">No trending topics yet</div>
+        )}
       </div>
     </main>
   );

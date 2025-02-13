@@ -61,9 +61,29 @@ async function getWikiData(name: string) {
   }
 }
 
+const hasVisited = (slug: string) => {
+  try {
+    const visits = JSON.parse(localStorage.getItem("visits") || "{}");
+    return !!visits[slug];
+  } catch {
+    return false;
+  }
+};
+
+const markVisited = (slug: string) => {
+  try {
+    const visits = JSON.parse(localStorage.getItem("visits") || "{}");
+    visits[slug] = Date.now();
+    localStorage.setItem("visits", JSON.stringify(visits));
+  } catch (e) {
+    console.error("Failed to mark visit:", e);
+  }
+};
+
 export default function ClientPage({ slug }: { slug: string }) {
   const [wikiData, setWikiData] = useState<WikiData | null>(null);
   const [hasRequested, setHasRequested] = useState(false);
+  const [isWikiLoading, setIsWikiLoading] = useState(true);
 
   const {
     object: eventData,
@@ -92,6 +112,7 @@ export default function ClientPage({ slug }: { slug: string }) {
   // Load Wikipedia data
   useEffect(() => {
     async function loadWikiData() {
+      setIsWikiLoading(true);
       const name = decodeURIComponent(slug)
         .split("-")
         .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -101,9 +122,30 @@ export default function ClientPage({ slug }: { slug: string }) {
       if (data) {
         setWikiData(data);
       }
+      setIsWikiLoading(false);
     }
     loadWikiData();
   }, [slug]);
+
+  // Track visit when Wikipedia data is loaded
+  useEffect(() => {
+    if (wikiData && !hasVisited(slug)) {
+      fetch("/api/track-visit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          slug,
+          title: wikiData.title,
+        }),
+      })
+        .then(() => {
+          markVisited(slug);
+        })
+        .catch(console.error);
+    }
+  }, [slug, wikiData]);
 
   // Debug logs
   useEffect(() => {
@@ -114,6 +156,26 @@ export default function ClientPage({ slug }: { slug: string }) {
       error,
     });
   }, [wikiData, eventData, isLoading, error]);
+
+  if (isWikiLoading) {
+    return (
+      <div className="container mx-auto px-4 py-8 text-gray-900 dark:text-white">
+        <nav className="mb-8 flex items-center justify-between">
+          <Link
+            href="/"
+            className="flex items-center text-lg text-gray-900 dark:text-white hover:text-blue-500 transition-colors"
+          >
+            <span className="mr-2">←</span>
+            Back to Search
+          </Link>
+        </nav>
+        <div className="flex items-center space-x-3">
+          <LoadingSpinner />
+          <span>Searching Wikipedia...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!wikiData) {
     return (
@@ -163,6 +225,26 @@ export default function ClientPage({ slug }: { slug: string }) {
           {error && (
             <div className="text-red-600 dark:text-red-400">
               Error: {error.message}
+            </div>
+          )}
+          {!isLoading && !error && (!events || events.length === 0) && (
+            <div className="p-4 rounded-lg bg-gray-100 dark:bg-gray-800">
+              <p className="text-gray-700 dark:text-gray-300">
+                No timeline events could be generated from the available
+                information. This might be because:
+              </p>
+              <ul className="list-disc ml-6 mt-2 text-gray-600 dark:text-gray-400">
+                <li>
+                  The Wikipedia excerpt doesn&apos;t contain enough
+                  chronological information
+                </li>
+                <li>
+                  The subject matter might not have a clear timeline of events
+                </li>
+              </ul>
+              <p className="mt-2 text-gray-700 dark:text-gray-300">
+                You can still read the Wikipedia description on the right.
+              </p>
             </div>
           )}
           <div className="space-y-4">
