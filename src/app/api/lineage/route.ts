@@ -1,41 +1,69 @@
-import { NextResponse } from "next/server";
-import { generateObject } from "ai";
-import { openai } from "@ai-sdk/openai";
-import { z } from "zod";
-import { put } from "@vercel/blob";
+"use server";
 
-const lineageSchema = z.object({
-  name: z.string(),
-  influences: z.array(z.string()),
-  influencedBy: z.array(z.string()),
-  description: z.string(),
-  genres: z.array(z.string()),
-  era: z.string(),
+import { openai } from "@ai-sdk/openai";
+import { streamObject } from "ai";
+import { z } from "zod";
+import { put, list } from "@vercel/blob";
+
+const schema = z.object({
+  events: z.object({
+    items: z
+      .array(
+        z.object({
+          date: z.string().describe("The date of the event"),
+          title: z.string().describe("The title of the event"),
+          description: z.string().describe("Description of what happened"),
+        }),
+      )
+      .describe("A chronological list of life events"),
+  }),
 });
 
-export async function POST(request: Request) {
-  const { artistName } = await request.json();
-
+export async function POST(req: Request) {
   try {
-    const { object: newLineage } = await generateObject({
+    const { prompt } = await req.json();
+    console.log("📥 Processing request for:", prompt);
+
+    // Check blob storage first
+    const blobPath = `events/${prompt.toLowerCase().replace(/\s+/g, "-")}.json`;
+    const blobs = await list({ prefix: blobPath });
+
+    if (blobs.blobs.length > 0) {
+      console.log("📦 Found cached data");
+      const response = await fetch(blobs.blobs[0].url);
+      const data = await response.json();
+      return new Response(JSON.stringify(data));
+    }
+
+    // Generate new data if not found
+    console.log("🤖 Generating new data");
+    const result = await streamObject({
       model: openai("gpt-4o"),
-      schema: lineageSchema,
-      prompt: `Create a musical lineage for ${artistName}. Include their influences, who they influenced, and their place in musical history.`,
+      system:
+        "You are helping create a chronological timeline of important life events.",
+      schemaName: "Timeline",
+      schema,
+      prompt: `Generate 5 significant life events for ${prompt}. Order them chronologically.`,
     });
 
-    const blobPath = `lineages/${artistName.toLowerCase().replace(/\s+/g, "-")}.json`;
+    // Stream partial objects
+    for await (const obj of result.partialObjectStream) {
+      console.dir(obj, { depth: null });
+    }
 
-    await put(blobPath, JSON.stringify(newLineage), {
+    // Save final object to blob storage
+    const finalObject = await result.object;
+    await put(blobPath, JSON.stringify(finalObject), {
       access: "public",
       addRandomSuffix: false,
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
 
-    return NextResponse.json(newLineage);
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to generate lineage" },
-      { status: 500 },
-    );
+    return new Response(JSON.stringify(finalObject));
+  } catch (error) {
+    console.error("❌ Error:", error);
+    return new Response(JSON.stringify({ error: String(error) }), {
+      status: 500,
+    });
   }
 }
