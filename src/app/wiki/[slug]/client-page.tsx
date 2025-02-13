@@ -80,7 +80,10 @@ export default function ClientPage({ slug }: { slug: string }) {
   // Only submit once and only if we have Wikipedia data
   useEffect(() => {
     if (!hasRequested && wikiData) {
-      submit({ prompt: wikiData.title });
+      submit({
+        prompt: wikiData.title,
+        wikiContent: wikiData.extract,
+      });
       setHasRequested(true);
     }
   }, [submit, hasRequested, wikiData]);
@@ -113,11 +116,11 @@ export default function ClientPage({ slug }: { slug: string }) {
 
   if (!wikiData) {
     return (
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 text-gray-900 dark:text-white">
         <nav className="mb-8 flex items-center justify-between">
           <Link
             href="/"
-            className="flex items-center text-lg hover:text-blue-500 transition-colors"
+            className="flex items-center text-lg text-gray-900 dark:text-white hover:text-blue-500 transition-colors"
           >
             <span className="mr-2">←</span>
             Back to Search
@@ -129,43 +132,52 @@ export default function ClientPage({ slug }: { slug: string }) {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      {/* Add navigation header */}
+    <div className="container mx-auto px-4 py-8 text-gray-900 dark:text-white">
       <nav className="mb-8 flex items-center justify-between">
         <Link
           href="/"
-          className="flex items-center text-lg hover:text-blue-500 transition-colors"
+          className="flex items-center text-lg text-gray-900 dark:text-white hover:text-blue-500 transition-colors"
         >
           <span className="mr-2">←</span>
           Back to Search
         </Link>
       </nav>
 
-      <h1 className="text-4xl font-mono mb-8">{wikiData.title}</h1>
+      <h1 className="text-4xl font-mono mb-8 text-gray-900 dark:text-white">
+        {wikiData.title}
+      </h1>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Left side: Events */}
         <div className="space-y-4">
-          <h2 className="text-2xl font-bold mb-4">Timeline</h2>
+          <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">
+            Timeline
+          </h2>
           {isLoading && (
-            <div>Generating events... (this may take a minute)</div>
+            <div className="text-gray-900 dark:text-white">
+              Generating events... (this may take a minute)
+            </div>
           )}
-          {error && <div>Error: {error.message}</div>}
+          {error && (
+            <div className="text-red-600 dark:text-red-400">
+              Error: {error.message}
+            </div>
+          )}
           <div className="space-y-4">
             {events?.map((event, i) => (
               <div
                 key={i}
                 className="p-4 border-l-4 border-blue-300 rounded-lg 
-                                         bg-white dark:bg-gray-800 shadow-sm 
-                                         hover:shadow-md transition-all duration-200"
+                         bg-white dark:bg-gray-800 shadow-sm 
+                         hover:shadow-md transition-all duration-200"
               >
-                <div className="text-sm text-gray-500 dark:text-gray-400">
+                <div className="text-sm text-gray-600 dark:text-gray-300">
                   {event?.date}
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
                   {event?.title}
                 </h3>
-                <p className="mt-2 text-gray-700 dark:text-gray-300">
+                <p className="mt-2 text-gray-800 dark:text-gray-200">
                   {event?.description}
                 </p>
               </div>
@@ -175,9 +187,14 @@ export default function ClientPage({ slug }: { slug: string }) {
 
         {/* Right side: Wikipedia Content */}
         <div className="space-y-4">
-          <h2 className="text-2xl font-bold mb-4">Description</h2>
+          <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">
+            Description
+          </h2>
           <div
-            className="prose lg:prose-xl dark:prose-invert"
+            className="prose lg:prose-xl max-w-none
+                     prose-headings:text-gray-900 prose-headings:dark:text-white
+                     prose-p:text-gray-800 prose-p:dark:text-gray-200
+                     prose-a:text-blue-600 prose-a:dark:text-blue-400"
             dangerouslySetInnerHTML={{ __html: wikiData.extract }}
           />
         </div>

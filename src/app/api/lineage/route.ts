@@ -15,13 +15,13 @@ const schema = z.object({
           description: z.string().describe("Description of what happened"),
         }),
       )
-      .describe("A chronological list of life events"),
+      .describe("A chronological list of significant events"),
   }),
 });
 
 export async function POST(req: Request) {
   try {
-    const { prompt } = await req.json();
+    const { prompt, wikiContent } = await req.json();
     console.log("📥 Processing request for:", prompt);
 
     // Check blob storage first
@@ -38,12 +38,20 @@ export async function POST(req: Request) {
     // Generate new data if not found
     console.log("🤖 Generating new data");
     const result = await streamObject({
-      model: openai("gpt-4o"),
-      system:
-        "You are helping create a chronological timeline of important life events.",
+      model: openai("gpt-4"),
+      system: `You are helping create a chronological timeline of significant events. 
+              Use the provided Wikipedia content as the source of truth.
+              Only include events that are mentioned in the Wikipedia content.
+              Dates should be as specific as possible based on the information provided.`,
       schemaName: "Timeline",
       schema,
-      prompt: `Generate 5 significant life events for ${prompt}. Order them chronologically.`,
+      prompt: `Using this Wikipedia content as context:
+
+${wikiContent}
+
+Generate 5 significant events for ${prompt}. Order them chronologically. 
+Only include events that are explicitly mentioned in the Wikipedia content.
+If there aren't enough explicit events, you can include fewer than 5 events.`,
     });
 
     // Stream the response to the client

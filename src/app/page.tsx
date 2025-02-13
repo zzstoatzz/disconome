@@ -57,7 +57,7 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
       <h1 className="text-5xl font-bold mb-12 text-gray-800 dark:text-gray-100">
-        Discono.me
+        discono.me
       </h1>
       <div className="w-full max-w-md relative">
         <form ref={formRef} onSubmit={handleSubmit} className="relative">

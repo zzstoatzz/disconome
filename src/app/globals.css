@@ -6,17 +6,24 @@
   --font-fira-code: 'Fira Code', monospace;
 }
 
+/* Light mode - default */
+:root {
+  --background: #ffffff;
+  --foreground: #111827;
+}
+
+/* Dark mode */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #111827;
+    --foreground: #ffffff;
   }
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-fira-code), Arial, sans-serif;
 }
 
 @layer base {
