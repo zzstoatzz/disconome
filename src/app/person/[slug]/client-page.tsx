@@ -23,10 +23,32 @@ interface WikiData {
 }
 
 async function getWikiData(name: string) {
-  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&titles=${encodeURIComponent(name)}&origin=*`;
+  // First, try to get an exact match
+  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=intitle:${encodeURIComponent(name)}&origin=*`;
 
   try {
-    const response = await fetch(searchUrl);
+    const searchResponse = await fetch(searchUrl);
+    const searchData = await searchResponse.json();
+
+    if (!searchData.query?.search?.length) {
+      return null;
+    }
+
+    // Find the closest title match
+    const searchResult = searchData.query.search.find(
+      (result: { title: string }) =>
+        result.title.toLowerCase() === name.toLowerCase() ||
+        result.title.toLowerCase().startsWith(name.toLowerCase() + " ") ||
+        result.title.toLowerCase().endsWith(" " + name.toLowerCase()),
+    );
+
+    if (!searchResult) {
+      return null;
+    }
+
+    // Get the full page content
+    const pageUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts|categories&exintro=true&titles=${encodeURIComponent(searchResult.title)}&origin=*`;
+    const response = await fetch(pageUrl);
     const data = await response.json();
     const pages = data.query.pages;
     const pageId = Object.keys(pages)[0];
@@ -35,9 +57,24 @@ async function getWikiData(name: string) {
       return null;
     }
 
+    const page = pages[pageId];
+
+    // Check if this is actually about a person
+    const categories = page.categories || [];
+    const isBiographical = categories.some(
+      (cat: { title: string }) =>
+        cat.title.toLowerCase().includes("living people") ||
+        cat.title.toLowerCase().includes("births") ||
+        cat.title.toLowerCase().includes("deaths"),
+    );
+
+    if (!isBiographical) {
+      return null;
+    }
+
     return {
-      extract: pages[pageId].extract,
-      title: pages[pageId].title,
+      extract: page.extract,
+      title: page.title,
     };
   } catch (error) {
     console.error("Error fetching Wikipedia data:", error);
@@ -65,11 +102,10 @@ export default function ClientPage({ slug }: { slug: string }) {
   // Only submit once and only if we have Wikipedia data
   useEffect(() => {
     if (!hasRequested && wikiData) {
-      const name = decodeURIComponent(slug);
-      submit({ prompt: name });
+      submit({ prompt: wikiData.title });
       setHasRequested(true);
     }
-  }, [slug, submit, hasRequested, wikiData]);
+  }, [submit, hasRequested, wikiData]);
 
   // Load Wikipedia data
   useEffect(() => {
