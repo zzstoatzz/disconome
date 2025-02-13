@@ -7,14 +7,14 @@ import { SearchSuggestions } from "@/components/SearchSuggestions";
 
 const SAMPLE_SUGGESTIONS = [
   "Albert Einstein",
-  "Marie Curie",
-  "Richard Feynman",
-  "Ada Lovelace",
-  "Alan Turing",
-  "Kendrick Lamar",
-  "Matthew McConaughey",
-  "Warren Buffett",
-  "Steve Jobs",
+  "Bitcoin",
+  "World War II",
+  "The Internet",
+  "Quantum Physics",
+  "Mount Everest",
+  "Renaissance",
+  "Industrial Revolution",
+  "Artificial Intelligence",
 ];
 
 export default function Home() {
@@ -29,7 +29,7 @@ export default function Home() {
     if (query.trim()) {
       setIsLoading(true);
       const slug = query.trim().toLowerCase().replace(/\s+/g, "-");
-      router.push(`/person/${slug}`);
+      router.push(`/wiki/${slug}`);
     }
   };
 
@@ -51,7 +51,7 @@ export default function Home() {
     setQuery(suggestion);
     setSuggestions([]);
     const slug = suggestion.toLowerCase().replace(/\s+/g, "-");
-    router.push(`/person/${slug}`);
+    router.push(`/wiki/${slug}`);
   };
 
   return (
@@ -65,7 +65,7 @@ export default function Home() {
             type="text"
             value={query}
             onChange={handleQueryChange}
-            placeholder="Enter a person's name..."
+            placeholder="Enter something..."
             className="w-full p-4 pr-12 text-lg font-mono border-2 border-gray-200 dark:border-gray-700 
                      rounded-lg focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 
                      focus:ring-0 text-gray-700 dark:text-gray-100 placeholder-gray-400 

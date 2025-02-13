@@ -24,7 +24,7 @@ interface WikiData {
 
 async function getWikiData(name: string) {
   // First, try to get an exact match
-  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=intitle:${encodeURIComponent(name)}&origin=*`;
+  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(name)}&origin=*`;
 
   try {
     const searchResponse = await fetch(searchUrl);
@@ -34,20 +34,11 @@ async function getWikiData(name: string) {
       return null;
     }
 
-    // Find the closest title match
-    const searchResult = searchData.query.search.find(
-      (result: { title: string }) =>
-        result.title.toLowerCase() === name.toLowerCase() ||
-        result.title.toLowerCase().startsWith(name.toLowerCase() + " ") ||
-        result.title.toLowerCase().endsWith(" " + name.toLowerCase()),
-    );
-
-    if (!searchResult) {
-      return null;
-    }
+    // Take the first result as it's usually the most relevant
+    const searchResult = searchData.query.search[0];
 
     // Get the full page content
-    const pageUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts|categories&exintro=true&titles=${encodeURIComponent(searchResult.title)}&origin=*`;
+    const pageUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&titles=${encodeURIComponent(searchResult.title)}&origin=*`;
     const response = await fetch(pageUrl);
     const data = await response.json();
     const pages = data.query.pages;
@@ -58,19 +49,6 @@ async function getWikiData(name: string) {
     }
 
     const page = pages[pageId];
-
-    // Check if this is actually about a person
-    const categories = page.categories || [];
-    const isBiographical = categories.some(
-      (cat: { title: string }) =>
-        cat.title.toLowerCase().includes("living people") ||
-        cat.title.toLowerCase().includes("births") ||
-        cat.title.toLowerCase().includes("deaths"),
-    );
-
-    if (!isBiographical) {
-      return null;
-    }
 
     return {
       extract: page.extract,
@@ -145,7 +123,7 @@ export default function ClientPage({ slug }: { slug: string }) {
             Back to Search
           </Link>
         </nav>
-        <div>No Wikipedia information found for this person.</div>
+        <div>No Wikipedia information found.</div>
       </div>
     );
   }
@@ -168,7 +146,7 @@ export default function ClientPage({ slug }: { slug: string }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Left side: Events */}
         <div className="space-y-4">
-          <h2 className="text-2xl font-bold mb-4">Life Events</h2>
+          <h2 className="text-2xl font-bold mb-4">Timeline</h2>
           {isLoading && (
             <div>Generating events... (this may take a minute)</div>
           )}
@@ -197,7 +175,7 @@ export default function ClientPage({ slug }: { slug: string }) {
 
         {/* Right side: Wikipedia Content */}
         <div className="space-y-4">
-          <h2 className="text-2xl font-bold mb-4">About</h2>
+          <h2 className="text-2xl font-bold mb-4">Description</h2>
           <div
             className="prose lg:prose-xl dark:prose-invert"
             dangerouslySetInnerHTML={{ __html: wikiData.extract }}
