@@ -46,20 +46,19 @@ export async function POST(req: Request) {
       prompt: `Generate 5 significant life events for ${prompt}. Order them chronologically.`,
     });
 
-    // Stream partial objects
-    for await (const obj of result.partialObjectStream) {
-      console.dir(obj, { depth: null });
-    }
+    // Stream the response to the client
+    const response = result.toTextStreamResponse();
 
-    // Save final object to blob storage
-    const finalObject = await result.object;
-    await put(blobPath, JSON.stringify(finalObject), {
-      access: "public",
-      addRandomSuffix: false,
-      token: process.env.BLOB_READ_WRITE_TOKEN,
+    // Save final object to blob storage after streaming starts
+    result.object.then(async (finalObject) => {
+      await put(blobPath, JSON.stringify(finalObject), {
+        access: "public",
+        addRandomSuffix: false,
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
     });
 
-    return new Response(JSON.stringify(finalObject));
+    return response;
   } catch (error) {
     console.error("❌ Error:", error);
     return new Response(JSON.stringify({ error: String(error) }), {
