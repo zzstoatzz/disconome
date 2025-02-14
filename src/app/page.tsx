@@ -1,46 +1,18 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { SearchSuggestions, Suggestion } from "@/components/SearchSuggestions";
-import Link from "next/link";
-import debounce from "debounce";
-
-interface LeaderboardEntry {
-  slug: string;
-  title: string;
-  count: number;
-}
+import { useSearch } from "@/hooks/useSearch";
+import { Leaderboard } from "@/components/Leaderboard";
 
 export default function Home() {
-  const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-
-  const fetchSuggestions = useCallback(
-    debounce(async (value: string) => {
-      if (value.trim().length < 2) {
-        setSuggestions([]);
-        return;
-      }
-
-      try {
-        const response = await fetch(
-          `/api/suggestions?q=${encodeURIComponent(value)}`,
-        );
-        const data = await response.json();
-        setSuggestions(data);
-      } catch (error) {
-        console.error("Error fetching suggestions:", error);
-        setSuggestions([]);
-      }
-    }, 300),
-    [],
-  );
+  const { query, setQuery, suggestions, setSuggestions, debouncedFetch } =
+    useSearch();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,30 +28,17 @@ export default function Home() {
     setQuery(value);
 
     if (value.trim()) {
-      fetchSuggestions(value);
+      debouncedFetch(value);
     } else {
       setSuggestions([]);
     }
   };
 
-  // Update the selection handler
   const handleSuggestionSelect = (suggestion: Suggestion) => {
     setQuery(suggestion.title);
     setSuggestions([]);
     router.push(`/wiki/${suggestion.slug}`);
   };
-  useEffect(() => {
-    fetch("/api/track-visit")
-      .then((res) => res.json())
-      .then((data) => {
-        setLeaderboard(data);
-        setIsLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error fetching leaderboard:", error);
-        setIsLoading(false);
-      });
-  }, []);
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
@@ -110,44 +69,12 @@ export default function Home() {
         </form>
 
         <SearchSuggestions
-          suggestions={suggestions as unknown as Suggestion[]}
+          suggestions={suggestions}
           onSelect={handleSuggestionSelect}
         />
       </div>
 
-      {/* Leaderboard Section */}
-      <div className="mt-12">
-        <h2 className="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100">
-          Most Viewed Entities
-        </h2>
-        {isLoading ? (
-          <div className="text-gray-600">Loading trending entities...</div>
-        ) : leaderboard.length > 0 ? (
-          <div className="space-y-2">
-            {leaderboard.slice(0, 5).map((entry, index) => (
-              <Link
-                key={entry.slug}
-                href={`/wiki/${entry.slug}`}
-                className="flex items-center p-3 bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow"
-              >
-                <span className="text-2xl font-bold text-gray-400 w-12">
-                  #{index + 1}
-                </span>
-                <div className="flex-grow">
-                  <h3 className="font-semibold text-gray-800 dark:text-gray-100">
-                    {entry.title}
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {entry.count} views
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <div className="text-gray-600">No trending entities yet</div>
-        )}
-      </div>
+      <Leaderboard />
     </main>
   );
 }
