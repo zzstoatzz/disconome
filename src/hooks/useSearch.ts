@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Suggestion } from "@/components/SearchSuggestions";
 import debounce from "debounce";
 
@@ -24,12 +24,17 @@ export function useSearch() {
     }
   }, []);
 
-  const debouncedFetch = useCallback(
+  // Create a memoized debounced function that persists across renders
+  const debouncedFetchRef = useRef(
     debounce((value: string) => {
       fetchSuggestions(value);
     }, 300),
-    [fetchSuggestions],
   );
+
+  // Return the stable function reference that calls the debounced function
+  const debouncedFetch = useCallback((value: string) => {
+    debouncedFetchRef.current(value);
+  }, []);
 
   return {
     query,
