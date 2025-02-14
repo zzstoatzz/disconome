@@ -1,22 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { SearchSuggestions } from "@/components/SearchSuggestions";
+import { SearchSuggestions, Suggestion } from "@/components/SearchSuggestions";
 import Link from "next/link";
-
-const SAMPLE_SUGGESTIONS = [
-  "Albert Einstein",
-  "Bitcoin",
-  "World War II",
-  "The Internet",
-  "Quantum Physics",
-  "Mount Everest",
-  "Renaissance",
-  "Industrial Revolution",
-  "Artificial Intelligence",
-];
+import debounce from "debounce";
 
 interface LeaderboardEntry {
   slug: string;
@@ -32,6 +21,27 @@ export default function Home() {
   const router = useRouter();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
+  const fetchSuggestions = useCallback(
+    debounce(async (value: string) => {
+      if (value.trim().length < 2) {
+        setSuggestions([]);
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/suggestions?q=${encodeURIComponent(value)}`,
+        );
+        const data = await response.json();
+        setSuggestions(data);
+      } catch (error) {
+        console.error("Error fetching suggestions:", error);
+        setSuggestions([]);
+      }
+    }, 300),
+    [],
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (query.trim()) {
@@ -46,22 +56,18 @@ export default function Home() {
     setQuery(value);
 
     if (value.trim()) {
-      const filtered = SAMPLE_SUGGESTIONS.filter((item) =>
-        item.toLowerCase().includes(value.toLowerCase()),
-      ).slice(0, 5);
-      setSuggestions(filtered);
+      fetchSuggestions(value);
     } else {
       setSuggestions([]);
     }
   };
 
-  const handleSuggestionSelect = (suggestion: string) => {
-    setQuery(suggestion);
+  // Update the selection handler
+  const handleSuggestionSelect = (suggestion: Suggestion) => {
+    setQuery(suggestion.title);
     setSuggestions([]);
-    const slug = suggestion.toLowerCase().replace(/\s+/g, "-");
-    router.push(`/wiki/${slug}`);
+    router.push(`/wiki/${suggestion.slug}`);
   };
-
   useEffect(() => {
     fetch("/api/track-visit")
       .then((res) => res.json())
@@ -104,7 +110,7 @@ export default function Home() {
         </form>
 
         <SearchSuggestions
-          suggestions={suggestions}
+          suggestions={suggestions as unknown as Suggestion[]}
           onSelect={handleSuggestionSelect}
         />
       </div>
@@ -118,7 +124,7 @@ export default function Home() {
           <div className="text-gray-600">Loading trending entities...</div>
         ) : leaderboard.length > 0 ? (
           <div className="space-y-2">
-            {leaderboard.map((entry, index) => (
+            {leaderboard.slice(0, 5).map((entry, index) => (
               <Link
                 key={entry.slug}
                 href={`/wiki/${entry.slug}`}
