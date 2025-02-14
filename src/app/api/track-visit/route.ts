@@ -1,88 +1,59 @@
 import { put, list } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
-const LEADERBOARD_KEY = "leaderboard.json";
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000; // 1 second
-const TOP_N = 3; // Show top 3 instead of 5
+const STATS_FILE = "stats.json";
 
-interface LeaderboardEntry {
-  slug: string;
-  title: string;
-  count: number;
-}
-
-async function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function updateLeaderboard(
-  slug: string,
-  title: string,
-  retryCount = 0,
-): Promise<boolean> {
-  try {
-    // Get current leaderboard
-    const { blobs } = await list();
-    let leaderboard: LeaderboardEntry[] = [];
-
-    const existingLeaderboard = blobs.find(
-      (blob) => blob.pathname === LEADERBOARD_KEY,
-    );
-    if (existingLeaderboard) {
-      const response = await fetch(existingLeaderboard.url);
-      leaderboard = await response.json();
-    }
-
-    // Update the leaderboard
-    const existingIndex = leaderboard.findIndex(
-      (item: LeaderboardEntry) => item.slug === slug,
-    );
-
-    if (existingIndex >= 0) {
-      leaderboard[existingIndex].count += 1;
-    } else {
-      leaderboard.push({
-        slug,
-        title,
-        count: 1,
-      });
-    }
-
-    const sortedLeaderboard = leaderboard
-      .sort((a: LeaderboardEntry, b: LeaderboardEntry) => b.count - a.count)
-      .slice(0, TOP_N);
-
-    // Save updated leaderboard
-    await put(LEADERBOARD_KEY, JSON.stringify(sortedLeaderboard), {
-      access: "public",
-    });
-
-    return true;
-  } catch (error) {
-    // If we hit a conflict or error, retry with backoff
-    if (retryCount < MAX_RETRIES) {
-      await sleep(RETRY_DELAY * Math.pow(2, retryCount));
-      return updateLeaderboard(slug, title, retryCount + 1);
-    }
-    throw error;
-  }
+interface ViewStats {
+  [key: string]: {
+    title: string;
+    views: number;
+  };
 }
 
 export async function POST(request: Request) {
   try {
     const { slug, title } = await request.json();
-
     if (!slug || !title) {
-      return new Response("Missing slug or title", { status: 400 });
+      return NextResponse.json(
+        { error: "Missing slug or title" },
+        { status: 400 },
+      );
     }
 
-    const success = await updateLeaderboard(slug, title);
-    return NextResponse.json({ success });
+    // Get current stats
+    const { blobs } = await list();
+    const existingBlob = blobs.find((b) => b.pathname === STATS_FILE);
+
+    let stats: ViewStats = {};
+    if (existingBlob) {
+      const response = await fetch(existingBlob.url);
+      if (response.ok) {
+        const existingStats = await response.json();
+        stats = { ...existingStats };
+      }
+    }
+
+    // Update the entry
+    stats[slug] = {
+      title,
+      views: (stats[slug]?.views || 0) + 1,
+    };
+
+    // Save the stats
+    await put(STATS_FILE, JSON.stringify(stats), {
+      access: "public",
+      addRandomSuffix: false,
+      contentType: "application/json",
+    });
+
+    return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error tracking visit:", error);
     return NextResponse.json(
-      { error: "Failed to track visit" },
+      {
+        error: "Failed to track visit",
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 },
     );
   }
@@ -91,22 +62,32 @@ export async function POST(request: Request) {
 export async function GET() {
   try {
     const { blobs } = await list();
-    const existingLeaderboard = blobs.find(
-      (blob) => blob.pathname === LEADERBOARD_KEY,
-    );
+    const existingBlob = blobs.find((b) => b.pathname === STATS_FILE);
 
-    if (existingLeaderboard) {
-      const response = await fetch(existingLeaderboard.url);
-      const leaderboard = await response.json();
-      return NextResponse.json(leaderboard);
+    if (existingBlob) {
+      const response = await fetch(existingBlob.url);
+      if (response.ok) {
+        const stats: ViewStats = await response.json();
+        console.log("GET: Found stats:", stats); // Debug log
+
+        // Convert to sorted array for display
+        const topEntities = Object.entries(stats)
+          .map(([slug, data]) => ({
+            slug,
+            title: data.title,
+            count: data.views,
+          }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3);
+
+        console.log("GET: Returning entities:", topEntities); // Debug log
+        return NextResponse.json(topEntities);
+      }
     }
 
     return NextResponse.json([]);
   } catch (error) {
-    console.error("Error fetching leaderboard:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch leaderboard" },
-      { status: 500 },
-    );
+    console.error("Error fetching stats:", error);
+    return NextResponse.json([]);
   }
 }

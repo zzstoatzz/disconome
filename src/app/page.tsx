@@ -135,7 +135,7 @@ export default function Home() {
             ))}
           </div>
         ) : (
-          <div className="text-gray-600">No trending topics yet</div>
+          <div className="text-gray-600">No trending entities yet</div>
         )}
       </div>
     </main>

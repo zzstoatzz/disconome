@@ -130,6 +130,7 @@ export default function ClientPage({ slug }: { slug: string }) {
   // Track visit when Wikipedia data is loaded
   useEffect(() => {
     if (wikiData && !hasVisited(slug)) {
+      console.log("🚀 Attempting to track visit for:", slug);
       fetch("/api/track-visit", {
         method: "POST",
         headers: {
@@ -140,10 +141,16 @@ export default function ClientPage({ slug }: { slug: string }) {
           title: wikiData.title,
         }),
       })
-        .then(() => {
-          markVisited(slug);
+        .then(async (response) => {
+          const data = await response.json();
+          console.log("✅ Track visit response:", data);
+          if (data.success) {
+            markVisited(slug);
+          }
         })
-        .catch(console.error);
+        .catch((error) => {
+          console.error("❌ Failed to track visit:", error);
+        });
     }
   }, [slug, wikiData]);
 
