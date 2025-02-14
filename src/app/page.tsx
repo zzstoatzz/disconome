@@ -111,7 +111,9 @@ export default function Home() {
 
       {/* Leaderboard Section */}
       <div className="mt-12">
-        <h2 className="text-2xl font-bold mb-4">Most Viewed Entities</h2>
+        <h2 className="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100">
+          Most Viewed Entities
+        </h2>
         {isLoading ? (
           <div className="text-gray-600">Loading trending entities...</div>
         ) : leaderboard.length > 0 ? (
@@ -126,7 +128,9 @@ export default function Home() {
                   #{index + 1}
                 </span>
                 <div className="flex-grow">
-                  <h3 className="font-semibold">{entry.title}</h3>
+                  <h3 className="font-semibold text-gray-800 dark:text-gray-100">
+                    {entry.title}
+                  </h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     {entry.count} views
                   </p>

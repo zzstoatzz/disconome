@@ -1,14 +1,8 @@
 import { put, list } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
-const STATS_FILE = "stats.json";
-
-interface ViewStats {
-  [key: string]: {
-    title: string;
-    views: number;
-  };
-}
+const STATS_PATH = "stats/views.json";
+const CACHE_MAX_AGE = 300; // 5 minutes, maximum edge cache time
 
 export async function POST(request: Request) {
   try {
@@ -20,29 +14,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get current stats
-    const { blobs } = await list();
-    const existingBlob = blobs.find((b) => b.pathname === STATS_FILE);
+    // Get current stats with prefix to ensure we get the right file
+    const { blobs } = await list({ prefix: "stats/" });
+    const existingBlob = blobs.find((b) => b.pathname === STATS_PATH);
 
-    let stats: ViewStats = {};
+    let stats: Record<string, { title: string; views: number }> = {};
     if (existingBlob) {
       const response = await fetch(existingBlob.url);
       if (response.ok) {
-        const existingStats = await response.json();
-        stats = { ...existingStats };
+        stats = await response.json();
       }
     }
 
-    // Update the entry
+    // Update stats
     stats[slug] = {
       title,
       views: (stats[slug]?.views || 0) + 1,
     };
 
-    // Save the stats
-    await put(STATS_FILE, JSON.stringify(stats), {
+    // Save with improved caching configuration
+    await put(STATS_PATH, JSON.stringify(stats), {
       access: "public",
       addRandomSuffix: false,
+      cacheControlMaxAge: CACHE_MAX_AGE,
       contentType: "application/json",
     });
 
@@ -50,10 +44,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Error tracking visit:", error);
     return NextResponse.json(
-      {
-        error: "Failed to track visit",
-        details: error instanceof Error ? error.message : String(error),
-      },
+      { error: "Failed to track visit" },
       { status: 500 },
     );
   }
@@ -61,31 +52,31 @@ export async function POST(request: Request) {
 
 export async function GET() {
   try {
-    const { blobs } = await list();
-    const existingBlob = blobs.find((b) => b.pathname === STATS_FILE);
+    const { blobs } = await list({ prefix: "stats/" });
+    const existingBlob = blobs.find((b) => b.pathname === STATS_PATH);
 
-    if (existingBlob) {
-      const response = await fetch(existingBlob.url);
-      if (response.ok) {
-        const stats: ViewStats = await response.json();
-        console.log("GET: Found stats:", stats); // Debug log
-
-        // Convert to sorted array for display
-        const topEntities = Object.entries(stats)
-          .map(([slug, data]) => ({
-            slug,
-            title: data.title,
-            count: data.views,
-          }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 3);
-
-        console.log("GET: Returning entities:", topEntities); // Debug log
-        return NextResponse.json(topEntities);
-      }
+    if (!existingBlob) {
+      return NextResponse.json([]);
     }
 
-    return NextResponse.json([]);
+    const response = await fetch(existingBlob.url);
+    if (!response.ok) {
+      return NextResponse.json([]);
+    }
+
+    const stats = await response.json();
+
+    // Convert to array and sort by views
+    const sortedStats = Object.entries(stats)
+      .map(([slug, data]) => ({
+        slug,
+        title: (data as { title: string }).title,
+        count: (data as { views: number }).views,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Return all stats instead of just top 3
+    return NextResponse.json(sortedStats);
   } catch (error) {
     console.error("Error fetching stats:", error);
     return NextResponse.json([]);

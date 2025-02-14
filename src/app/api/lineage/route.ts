@@ -48,10 +48,10 @@ export async function POST(req: Request) {
     console.log("🤖 Generating new data");
     const result = await streamObject({
       model: openai("gpt-4o"),
-      system: `You are helping create a chronological timeline of significant events. 
-              Use the provided Wikipedia content as the source of truth.
-              Only include events that are mentioned in the Wikipedia content.
-              Dates should be as specific as possible based on the information provided.`,
+      system: `You are an expert historian with deep knowledge of world history. 
+              Use the provided Wikipedia content for specific citations but use your 
+              own knowledge to aptrly partition the timeline into 5 significant events.
+              Dates should be as specific and consistent with each other as possible.`,
       schemaName: "Timeline",
       schema,
       prompt: `Using this Wikipedia content as context:

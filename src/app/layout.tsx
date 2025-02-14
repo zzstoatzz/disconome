@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import "./globals.css";
+import Footer from "@/components/Footer";
 
 const firaCode = Fira_Code({
   subsets: ["latin"],
@@ -21,12 +22,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className="h-full">
       <body
-        className={`${firaCode.variable} font-mono antialiased bg-gray-50 dark:bg-gray-900 transition-colors duration-200`}
+        className={`${firaCode.variable} font-mono antialiased bg-gray-50 dark:bg-gray-900 transition-colors duration-200 h-full flex flex-col`}
       >
         <ThemeToggle />
-        {children}
+        <main
+          className="flex-1 overflow-auto"
+          role="main"
+          aria-label="Main content"
+        >
+          {children}
+        </main>
+        <Footer />
         <Analytics />
         <SpeedInsights />
       </body>
