@@ -10,7 +10,7 @@ interface SparkPoint {
   blur: number;
 }
 
-const PORTAL_BLUE = "40, 180, 255";
+const PORTAL_BLUE = "40, 90, 255";
 const MAX_SPARKS = 50;
 let nextId = 1;
 

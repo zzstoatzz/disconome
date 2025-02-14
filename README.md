@@ -4,8 +4,7 @@ render a timeline for a given thing on wikipedia
 
 ## features
 - 📊 Timeline generation for Wikipedia articles
-- 📈 Most viewed topics leaderboard
-- 📱 Responsive design for all devices
+- 📈 Most viewed entities leaderboard
 
 
 ## development
