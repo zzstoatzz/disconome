@@ -50,4 +50,4 @@ bun dev
 - [Next.js 14](https://nextjs.org/) with App Router
 - [Tailwind CSS](https://tailwindcss.com/) for styling
 - [Vercel Blob Storage](https://vercel.com/docs/storage/vercel-blob) for caching
-- [OpenAI API](https://openai.com/api/) for timeline generation
+- [OpenAI API](https://openai.com/api/) via [Vercel AI SDK](https://sdk.vercel.ai/)
