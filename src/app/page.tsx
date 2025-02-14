@@ -6,7 +6,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { SearchSuggestions, Suggestion } from "@/components/SearchSuggestions";
 import { useSearch } from "@/hooks/useSearch";
 import { Leaderboard } from "@/components/Leaderboard";
-
+import EntityGraph from "@/components/EntityGraph";
 export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
@@ -42,6 +42,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
+      <EntityGraph />
       <h1 className="text-5xl font-bold mb-12 text-gray-800 dark:text-gray-100">
         discono.me
       </h1>
@@ -63,7 +64,7 @@ export default function Home() {
             {isLoading ? (
               <LoadingSpinner />
             ) : (
-              query && <span className="text-sm">Press Enter ↵</span>
+              query && <span className="text-sm">↵</span>
             )}
           </div>
         </form>
