@@ -8,7 +8,7 @@ import React, {
   useCallback,
 } from "react";
 import { useRouter } from "next/navigation";
-
+import { MAX_VISIBLE_LABELS } from "@/app/constants";
 type Node = {
   slug: string;
   x: number;
@@ -36,7 +36,7 @@ const EntityGraph = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const dataFetchedRef = useRef(false); // Prevent duplicate fetches
-  const MAX_VISIBLE_NODES = 30;
+  const MAX_VISIBLE_NODES = 32;
   const svgRef = useRef<SVGSVGElement>(null);
   const [time, setTime] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
@@ -244,7 +244,7 @@ const EntityGraph = () => {
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  // Get unique labels for legend - memoized to prevent recalculation and limit to top 5
+  // Get unique labels for legend - memoized to prevent recalculation and limit to top 7
   const uniqueLabels = useMemo(() => {
     const labelCounts = new Map<string, number>();
     nodes.forEach((node) => {
@@ -253,10 +253,10 @@ const EntityGraph = () => {
       );
     });
 
-    // Sort by frequency and take top 5
+    // Sort by frequency and take top 7
     return Array.from(labelCounts.entries())
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
+      .slice(0, MAX_VISIBLE_LABELS)
       .map(([label]) => label);
   }, [nodes]);
 
@@ -379,7 +379,6 @@ const EntityGraph = () => {
   useEffect(() => {
     const animate = () => {
       setTime((prev) => {
-        console.log("Time:", prev); // Debug log
         return prev + 1;
       });
       animationFrameRef.current = requestAnimationFrame(animate);

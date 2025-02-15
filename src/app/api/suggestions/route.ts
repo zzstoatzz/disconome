@@ -1,7 +1,7 @@
 // app/api/suggestions/route.ts
 import { NextResponse } from "next/server";
 import { StatsMap } from "@/types";
-
+import { MAX_VISIBLE_SUGGESTIONS } from "@/app/constants";
 const SAMPLE_SUGGESTIONS = [
   "Albert Einstein",
   "Bitcoin",
@@ -62,7 +62,7 @@ export async function GET(request: Request) {
           item.title.toLowerCase().includes(query) || item.slug.includes(query),
       )
       .sort((a, b) => b.count - a.count) // Sort by view count
-      .slice(0, 5)
+      .slice(0, MAX_VISIBLE_SUGGESTIONS)
       .map((item) => ({
         title: item.title,
         slug: item.slug,

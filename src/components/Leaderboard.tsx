@@ -31,7 +31,9 @@ export function Leaderboard() {
         most viewed entities
       </h2>
       {isLoading ? (
-        <div className="text-gray-600">Loading trending entities...</div>
+        <div className="text-gray-600 text-center">
+          Loading trending entities...
+        </div>
       ) : leaderboard.length > 0 ? (
         <div className="space-y-2">
           {leaderboard.slice(0, 3).map((entry, index) => (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-
+import { MAX_TRAIL_LENGTH, MAX_SPARKS, PORTAL_BLUE } from "@/app/constants";
 interface SparkPoint {
   id: number;
   x: number;
@@ -10,8 +10,6 @@ interface SparkPoint {
   blur: number;
 }
 
-const PORTAL_BLUE = "40, 90, 255";
-const MAX_SPARKS = 50;
 let nextId = 1;
 
 export default function MouseTrail() {
@@ -57,8 +55,8 @@ export default function MouseTrail() {
       positions.push({ x: e.clientX, y: e.clientY });
 
       // Limit stored positions for smooth trailing
-      if (positions.length > 5) {
-        positions = positions.slice(-5);
+      if (positions.length > MAX_TRAIL_LENGTH) {
+        positions = positions.slice(-MAX_TRAIL_LENGTH);
       }
     };
 
