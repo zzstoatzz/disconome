@@ -27,7 +27,7 @@ export function Leaderboard() {
 
   return (
     <div className="mt-12 relative z-10">
-      <h2 className="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100">
+      <h2 className="text-2xl font-bold mb-4 text-gray-800 dark:text-gray-100 text-center">
         most viewed entities
       </h2>
       {isLoading ? (

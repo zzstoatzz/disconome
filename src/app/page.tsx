@@ -14,6 +14,7 @@ export default function Home() {
   const router = useRouter();
   const { query, setQuery, suggestions, setSuggestions, debouncedFetch } =
     useSearch();
+  const [isContentVisible, setIsContentVisible] = useState(true);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,16 +43,20 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-4 relative">
+    <main className="min-h-screen p-4 relative grid place-items-center">
       <div className="fixed inset-0 transition-colors duration-500">
         <EntityGraph />
       </div>
 
-      <div className="relative z-10">
-        <h1 className="text-5xl font-bold mb-12 text-gray-800 dark:text-gray-100">
+      <div
+        className={`relative z-10 w-full max-w-md transition-opacity duration-300 ${
+          isContentVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+      >
+        <h1 className="text-5xl font-bold mb-12 text-gray-800 dark:text-gray-100 text-center">
           discono.me
         </h1>
-        <div className="w-full max-w-md relative">
+        <div className="w-full relative backdrop-blur-sm bg-white/90 dark:bg-gray-800/90 p-4 rounded-lg sm:bg-transparent sm:dark:bg-transparent sm:backdrop-blur-none sm:p-0">
           <form ref={formRef} onSubmit={handleSubmit} className="relative">
             <input
               type="text"
@@ -78,10 +83,20 @@ export default function Home() {
             suggestions={suggestions}
             onSelect={handleSuggestionSelect}
           />
-        </div>
 
-        <Leaderboard />
+          <Leaderboard />
+        </div>
       </div>
+
+      <button
+        onClick={() => setIsContentVisible(!isContentVisible)}
+        className="fixed bottom-6 right-6 z-20 p-3 rounded-full bg-white/90 dark:bg-gray-800/90 
+                 shadow-lg backdrop-blur-sm hover:bg-white dark:hover:bg-gray-700 
+                 transition-all duration-200"
+        aria-label={isContentVisible ? "Enter zen mode" : "Exit zen mode"}
+      >
+        {isContentVisible ? "⌘" : "⎋"}
+      </button>
     </main>
   );
 }
