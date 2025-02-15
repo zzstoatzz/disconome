@@ -16,7 +16,7 @@ const schema = z.object({
           description: z.string().describe("Description of what happened"),
         }),
       )
-      .describe("A chronological list of significant events, max 8"),
+      .describe("A chronological list of significant events").max(8),
   }),
 });
 
