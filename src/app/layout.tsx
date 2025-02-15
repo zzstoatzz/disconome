@@ -57,7 +57,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${firaCode.variable} font-mono antialiased bg-gray-50 dark:bg-gray-900 transition-colors duration-200 h-full flex flex-col`}
+        className={`${firaCode.variable} font-mono antialiased bg-gray-50 dark:bg-gray-900 h-full flex flex-col`}
       >
         <MouseTrail />
         <a

@@ -16,9 +16,7 @@ const schema = z.object({
           description: z.string().describe("Description of what happened"),
         }),
       )
-      .describe(
-        "A chronological list of significant events, at least 3, no more than 6",
-      ),
+      .describe("A chronological list of significant events").max(8),
   }),
 });
 
@@ -50,10 +48,7 @@ export async function POST(req: Request) {
     console.log("🤖 Generating new data");
     const result = await streamObject({
       model: openai("gpt-4o"),
-      system: `You are an expert historian with deep knowledge of world history. 
-              Use the provided Wikipedia content for specific citations but use your 
-              own knowledge to aptly partition the timeline considering the big picture.
-              Dates should be as specific and consistent with each other as possible.`,
+      system: `You are an expert historian with deep knowledge of world history. When using dates, make sure they are as specific and consistent with each other as possible.`,
       schemaName: "Timeline",
       schema,
       prompt: `Using this Wikipedia content as context:
@@ -61,8 +56,10 @@ export async function POST(req: Request) {
 ${wikiContent}
 
 Generate significant events for ${prompt}. Order them chronologically. 
-If there aren't enough explicit events, you can include fewer than 5 events
-but feel free to extrapolate as needed to make at least 3 timeline events.`,
+Use the provided Wikipedia content for specific citations but use your 
+own knowledge to aptly partition the timeline into multiple significant events,
+extrapolate as needed to make at least 3 timeline events.
+    `,
     });
 
     // Stream the response to the client

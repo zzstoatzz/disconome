@@ -51,3 +51,56 @@ bun dev
 - [Tailwind CSS](https://tailwindcss.com/) for styling
 - [Vercel Blob Storage](https://vercel.com/docs/storage/vercel-blob) for caching
 - [OpenAI API](https://openai.com/api/) via [Vercel AI SDK](https://sdk.vercel.ai/)
+
+
+<details>
+<summary>dev log</summary>
+
+
+### entity graph visualization
+Current state:
+- ✅ Basic force-directed graph with nodes representing viewed entities
+- ✅ Node size scales with view count
+- ✅ Nodes evenly distributed in circular layout
+- ✅ Subtle connection lines with opacity based on combined view count
+- ✅ Efficient classification system with blob storage versioning (v3)
+- ✅ Immediate node rendering with async classification loading
+- ✅ Top 5 most effective categories shown in legend
+- ✅ Responsive category display optimized for mobile
+- ✅ Full dark/light theme support with smooth transitions
+- ✅ Dynamic edge and node colors based on theme
+
+Still needed:
+- [ ] Performance optimization
+  - Consider WebGL renderer for larger graphs
+  - Implement node culling for off-screen elements
+  - Batch classification requests more efficiently
+- [ ] Connection visualization refinement
+  - Add subtle "electricity" effect on connections
+  - Improve hover state transitions
+  - Consider curved edges for better visual flow
+- [ ] Category system improvements
+  - Implement smarter category rotation based on connection strength
+  - Add visual feedback during category cleanup
+  - Consider hierarchical categories for better organization
+- [ ] Mobile interaction refinement
+  - Add touch-friendly node interactions
+  - Improve zoom and pan controls for touch devices
+  - Optimize hover states for touch interfaces
+
+Next steps:
+1. Implement WebGL renderer for better performance
+2. Add subtle animation effects to connections
+3. Improve category system with hierarchical organization
+4. Add visual feedback during cleanup operations
+5. Optimize classification batching and caching
+6. Enhance mobile touch interactions
+
+Technical debt to address:
+- Clean up old blob storage versions
+- Consolidate shared types and utilities
+- Add error boundaries for graph visualization
+- Improve test coverage for classification system
+- Refactor theme handling for better SSR compatibility
+
+</details>
