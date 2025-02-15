@@ -6,106 +6,147 @@ import { put, list } from "@vercel/blob";
 import { StatsMap } from "@/types";
 
 const STATS_PATH = "stats/views.json";
-const CLASSIFICATIONS_PATH = "classifications/v1/"; // Versioned namespace
-const MAX_LABELS = 5;
-const MAX_VISIBLE_NODES = 15; // Limit visible nodes for performance
+const CLASSIFICATIONS_PATH = "classifications/v3/"; // Incremented to v3
+const MAX_VISIBLE_NODES = 25;
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 const ClassificationSchema = z.object({
     labels: z.array(z.string()).max(3),
     explanation: z.string(),
 });
 
-// Helper to get label strength (how well it connects nodes)
-function getLabelStrength(label: string, stats: StatsMap): number {
-    const nodesWithLabel = Object.values(stats).filter(
-        entity => entity.labels?.includes(label)
-    ).length;
-    return nodesWithLabel;
+// Helper to sanitize paths for blob storage
+function sanitizePath(path: string): string {
+    return path
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-') // Replace any non-alphanumeric chars with dash
+        .replace(/-+/g, '-')         // Replace multiple dashes with single dash
+        .replace(/^-|-$/g, '');      // Remove leading/trailing dashes
 }
 
-// Helper to get or create classification
-async function getClassification(title: string, existingLabels: Set<string>, stats: StatsMap) {
-    const slug = title.toLowerCase().replace(/\s+/g, '-');
-    const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
+// Add new cache management
+let classificationsCache: {
+    timestamp: number;
+    data: Map<string, {
+        labels: string[];
+        timestamp: number;
+    }>;
+} | null = null;
 
-    // Check existing classification
-    const { blobs } = await list({ prefix: classificationPath });
-    if (blobs.length > 0) {
-        const response = await fetch(blobs[0].url);
-        return response.json();
+// Add new helper function
+async function getClassificationsCache() {
+    // Return existing cache if fresh
+    if (classificationsCache && (Date.now() - classificationsCache.timestamp < CACHE_DURATION)) {
+        return classificationsCache.data;
     }
 
-    // Get label strengths for context
-    const labelStrengths = Array.from(existingLabels).map(label => ({
-        label,
-        strength: getLabelStrength(label, stats)
-    }));
+    try {
+        // Fetch all classifications at once
+        const { blobs } = await list({ prefix: CLASSIFICATIONS_PATH });
+        const newCache = new Map();
 
-    // Generate new classification
-    const result = await generateObject({
-        model: openai('gpt-4o'),
-        schema: ClassificationSchema,
-        prompt: `Classify this entity: "${title}" into 1-3 categories.
-        
-        Current top categories (with connection counts):
-        ${labelStrengths.map(({ label, strength }) => `${label} (${strength} connections)`).join(", ")}
+        // Process in parallel
+        await Promise.all(blobs.map(async (blob) => {
+            try {
+                const data = await (await fetch(blob.url)).json();
+                const slug = blob.pathname.replace(`${CLASSIFICATIONS_PATH}`, '').replace('.json', '');
+                newCache.set(slug, {
+                    labels: Array.isArray(data.labels) ? data.labels : [],
+                    timestamp: data.timestamp || Date.now()
+                });
+            } catch (error) {
+                console.error(`Error loading classification: ${blob.pathname}`, error);
+            }
+        }));
 
-        GOALS:
-        1. Prefer existing categories to create stronger connections
-        2. Only create a new category if it would be broadly applicable to many entities
-        3. More general categories that can connect many nodes are better
-        4. If creating a new category, it should replace the weakest existing category
+        classificationsCache = {
+            timestamp: Date.now(),
+            data: newCache
+        };
 
-        We maintain only ${MAX_LABELS} categories total for the entire system.`
-    });
-
-    const classification = result.object;
-    await put(classificationPath, JSON.stringify(classification), {
-        access: "public",
-        addRandomSuffix: false
-    });
-
-    return classification;
+        return newCache;
+    } catch (error) {
+        console.error("Error loading classifications cache:", error);
+        return new Map();
+    }
 }
 
 export async function POST(req: Request) {
     try {
-        const { title } = await req.json();
-        console.log("Classifying:", title);
+        const { title, prompt } = await req.json();
+        const slug = sanitizePath(title);
 
-        // Get current stats to check existing labels
+        // Get cached classifications
+        const classifications = await getClassificationsCache();
+        const cached = classifications.get(slug);
+
+        if (cached && (Date.now() - cached.timestamp < CACHE_DURATION)) {
+            return NextResponse.json({ labels: cached.labels });
+        }
+
+        // Check for existing classification first
+        const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
+        const { blobs: classificationBlobs } = await list({ prefix: classificationPath });
+        if (classificationBlobs.length > 0) {
+            const existingClassification = await (await fetch(classificationBlobs[0].url)).json();
+            // Ensure labels is always an array
+            existingClassification.labels = Array.isArray(existingClassification.labels) ?
+                existingClassification.labels : [];
+            return NextResponse.json(existingClassification);
+        }
+
+        // Get current stats to find top viewed nodes
         const { blobs } = await list({ prefix: "stats/" });
         const statsBlob = blobs.find(b => b.pathname === STATS_PATH);
         if (!statsBlob) {
-            console.warn("No stats blob found for classification");
             return NextResponse.json({ error: 'No stats found' }, { status: 404 });
         }
 
-        const response = await fetch(statsBlob.url);
-        const stats: StatsMap = await response.json();
+        const stats: StatsMap = await (await fetch(statsBlob.url)).json();
 
-        // Get current top labels by frequency
-        const labelCounts = new Map<string, number>();
-        Object.values(stats).forEach(entity =>
-            entity.labels?.forEach(label =>
-                labelCounts.set(label, (labelCounts.get(label) || 0) + 1)
-            )
-        );
+        // Get top viewed nodes and their labels
+        const topNodes = Object.entries(stats)
+            .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
+            .slice(0, MAX_VISIBLE_NODES)
+            .map(([slug, data]) => ({
+                slug,
+                title: data.title,
+                views: data.views,
+                labels: data.labels || []
+            }));
 
-        // Keep only top N labels
-        const topLabels = new Set(
-            Array.from(labelCounts.entries())
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, MAX_LABELS)
-                .map(([label]) => label)
-        );
+        // Generate classification considering top nodes
+        const result = await generateObject({
+            model: openai('gpt-4o'),
+            schema: ClassificationSchema,
+            prompt: `${prompt || `Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities:`}
 
-        const classification = await getClassification(title, topLabels, stats);
-        console.log("Classification result:", classification);
+            Top viewed entities and their current labels:
+            ${topNodes.map(n => `- ${n.title}: ${n.labels.join(', ')}`).join('\n')}
 
-        return NextResponse.json(classification);
+            Focus on finding or creating categories that could meaningfully connect multiple entities.`
+        });
+
+        // Store classification
+        await put(classificationPath, JSON.stringify({
+            ...result.object,
+            timestamp: Date.now(),
+            title
+        }), {
+            access: "public",
+            addRandomSuffix: false
+        });
+
+        // Cache the result
+        classifications.set(slug, {
+            labels: Array.isArray(result.object.labels) ? result.object.labels : [],
+            timestamp: Date.now()
+        });
+
+        return NextResponse.json(result.object);
     } catch (error) {
         console.error("Error classifying entity:", error);
-        return NextResponse.json({ error: String(error) }, { status: 500 });
+        // Return empty labels array on error instead of error response
+        return NextResponse.json({ labels: [] });
     }
 } 

@@ -58,23 +58,35 @@ bun dev
 Current state:
 - ✅ Basic force-directed graph with nodes representing viewed entities
 - ✅ Node size scales with view count
-- ✅ Nodes repel from center creating a "donut" effect around the search box
-- ✅ Basic color scheme implemented with HSL rotation
-- ✅ Smooth animations and transitions
+- ✅ Nodes evenly distributed in circular layout
+- ✅ Subtle connection lines with opacity based on combined view count
+- ✅ Efficient classification system with blob storage versioning (v3)
+- ✅ Immediate node rendering with async classification loading
+- ✅ Top 5 most effective categories shown in legend
 
 Still needed:
-- [ ] Entity classification system integration
-  - Classification API is set up but not yet connected to visualization
-  - Need to verify classification data flow from API to frontend
-- [ ] Connection visualization between related entities
-  - Labels should appear on edges between nodes sharing categories
-  - Edge thickness could represent strength of relationship
-- [ ] Performance optimization for larger graphs
-  - Consider using WebGL or Canvas for better performance
+- [ ] Performance optimization
+  - Consider WebGL renderer for larger graphs
   - Implement node culling for off-screen elements
+  - Batch classification requests more efficiently
+- [ ] Connection visualization refinement
+  - Add subtle "electricity" effect on connections
+  - Improve hover state transitions
+  - Consider curved edges for better visual flow
+- [ ] Category system improvements
+  - Implement smarter category rotation based on connection strength
+  - Add visual feedback during category cleanup
+  - Consider hierarchical categories for better organization
 
 Next steps:
-1. Debug classification data flow from API to frontend
-2. Implement edge rendering between related nodes
-3. Add interactive features (hover states, zoom, pan)
-4. Optimize performance for larger datasets
+1. Implement WebGL renderer for better performance
+2. Add subtle animation effects to connections
+3. Improve category system with hierarchical organization
+4. Add visual feedback during cleanup operations
+5. Optimize classification batching and caching
+
+Technical debt to address:
+- Clean up old blob storage versions
+- Consolidate shared types and utilities
+- Add error boundaries for graph visualization
+- Improve test coverage for classification system

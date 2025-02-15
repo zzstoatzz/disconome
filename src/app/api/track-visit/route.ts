@@ -29,58 +29,51 @@ let cachedStats: StatsMap | null = null;
 let lastFetch = 0;
 const CACHE_DURATION = 60000; // 1 minute
 
-const BATCH_SIZE = 5; // Process 5 unclassified items at a time
+const BATCH_SIZE = 10; // Process 10 unclassified items at a time
+const DEBOUNCE_DELAY = 100; // ms
 
 // Process unclassified items sequentially
 async function processUnclassifiedItems(items: [string, any][], cachedStats: StatsMap) {
   let hasUpdates = false;
+  const batchPromises = [];
 
-  // Get current label usage
-  const labelCounts = new Map<string, number>();
-  Object.values(cachedStats).forEach(entity =>
-    entity.labels?.forEach(label =>
-      labelCounts.set(label, (labelCounts.get(label) || 0) + 1)
-    )
-  );
+  // Process items in smaller chunks for smoother loading
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    const promise = new Promise(async (resolve) => {
+      await new Promise(r => setTimeout(r, i * DEBOUNCE_DELAY)); // Stagger requests
 
-  // Process each item
-  for (const [slug, data] of items) {
-    try {
-      const classifyResponse = await fetch(`${BASE_URL}/api/classify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: data.title,
-          labelCounts: Object.fromEntries(labelCounts)
-        })
-      });
+      for (const [slug, data] of batch) {
+        try {
+          const classifyResponse = await fetch(`${BASE_URL}/api/classify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: data.title,
+              labelCounts: cachedStats[slug]?.labels?.length ?
+                { [cachedStats[slug].labels[0]]: 1 } :
+                {}
+            })
+          });
 
-      if (classifyResponse.ok) {
-        const classification = await classifyResponse.json();
-        if (classification.labels) {
-          cachedStats[slug].labels = classification.labels;
-          cachedStats[slug].lastClassified = Date.now();
-          hasUpdates = true;
-
-          // Update label counts for next classification
-          classification.labels.forEach(label =>
-            labelCounts.set(label, (labelCounts.get(label) || 0) + 1)
-          );
+          if (classifyResponse.ok) {
+            const classification = await classifyResponse.json();
+            if (classification.labels) {
+              cachedStats[slug].labels = classification.labels;
+              cachedStats[slug].lastClassified = Date.now();
+              hasUpdates = true;
+            }
+          }
+        } catch (error) {
+          console.error(`Classification failed for ${data.title}:`, error);
         }
       }
-    } catch (error) {
-      console.error(`Classification failed for ${data.title}:`, error);
-    }
-  }
-
-  if (hasUpdates) {
-    await put(STATS_PATH, JSON.stringify(cachedStats), {
-      access: "public",
-      addRandomSuffix: false,
-      cacheControlMaxAge: CACHE_MAX_AGE
+      resolve(null);
     });
+    batchPromises.push(promise);
   }
 
+  await Promise.all(batchPromises);
   return hasUpdates;
 }
 
@@ -143,6 +136,7 @@ export async function GET() {
     if (cachedStats && (Date.now() - lastFetch < CACHE_DURATION)) {
       return NextResponse.json(
         Object.entries(cachedStats)
+          .filter(([_, data]) => data.labels?.length && data.labels?.length > 0)
           .map(([slug, data]) => ({
             slug,
             title: data.title,
@@ -178,7 +172,7 @@ export async function GET() {
 
     // Get classified nodes for display
     const sortedStats = Object.entries(cachedStats)
-      .filter(([_, data]) => data.labels?.length > 0)
+      .filter(([_, data]) => data.labels?.length && data.labels?.length > 0)
       .map(([slug, data]) => ({
         slug,
         title: data.title,

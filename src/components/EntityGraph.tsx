@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 type Node = {
@@ -18,6 +18,8 @@ type Edge = {
   source: Node;
   target: Node;
   label: string;
+  labels: string[];
+  strength: number; // Combined view count
 };
 
 const EntityGraph = () => {
@@ -27,19 +29,44 @@ const EntityGraph = () => {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-  const animationRef = useRef<number>();
   const dataFetchedRef = useRef(false); // Prevent duplicate fetches
-  const MAX_VISIBLE_NODES = 15; // Limit visible nodes for performance
+  const MAX_VISIBLE_NODES = 30;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [time, setTime] = useState(0);
+  const animationFrameRef = useRef<number | null>(null);
+  const [nodeVisibility, setNodeVisibility] = useState<boolean[]>([]);
+
+  // Add loading states
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [labelsLoaded, setLabelsLoaded] = useState(false);
+
+  // Track when labels are loaded via classification
+  useEffect(() => {
+    const hasLabels = nodes.some(node => (node.labels || []).length > 0);
+    if (hasLabels && !labelsLoaded) {
+      setLabelsLoaded(true);
+    }
+  }, [nodes, labelsLoaded]);
+
+  // Restore the fade-in effect for nodes
+  useEffect(() => {
+    if (nodes.length > 0) {
+      setNodesLoaded(true);
+    }
+  }, [nodes, nodesLoaded]);
 
   const calculateNodeSize = (count: number, data: { count: number }[]) => {
     const maxCount = Math.max(...data.map((d) => d.count));
     return 6 + (count / maxCount) * 12; // Reduced from 8 + ... * 16
   };
 
-  // Calculate edges between nodes that share labels
-  const calculateEdges = (nodes: Node[]) => {
+  // Convert calculateEdges to useCallback and fix the nodes parameter issue
+  const calculateEdges = useCallback(() => {
     const newEdges: Edge[] = [];
     const processedPairs = new Set<string>();
+
+    // Only process if we have nodes
+    if (!nodes.length) return newEdges;
 
     nodes.forEach((source) => {
       nodes.forEach((target) => {
@@ -54,15 +81,47 @@ const EntityGraph = () => {
         ) || [];
 
         if (sharedLabels.length > 0) {
+          const strength = (source.count + target.count) / 2;
           newEdges.push({
             source,
             target,
-            label: sharedLabels[0] // Use first shared label for simplicity
+            labels: sharedLabels,
+            label: hoveredLabel && sharedLabels.includes(hoveredLabel) ?
+              hoveredLabel : sharedLabels[0],
+            strength
           });
         }
       });
     });
+
     return newEdges;
+  }, [nodes, hoveredLabel]);
+
+  // Update the useEffect that uses calculateEdges
+  useEffect(() => {
+    if (nodes.length > 0) {
+      setEdges(calculateEdges());
+    }
+  }, [nodes, calculateEdges]);
+
+  // Center calculation helper
+  const getCenter = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    return {
+      x: rect ? rect.width / 2 : dimensions.width / 2,
+      y: rect ? rect.height / 2 : dimensions.height / 2
+    };
+  }, [dimensions.width, dimensions.height]);
+
+  // Update node distribution
+  const distributeNodes = (nodes: Node[], center: { x: number, y: number }, radius: number) => {
+    const angleStep = (2 * Math.PI) / nodes.length;
+
+    return nodes.map((node, i) => ({
+      ...node,
+      x: center.x + radius * Math.cos(i * angleStep - Math.PI / 2), // Start from top
+      y: center.y + radius * Math.sin(i * angleStep - Math.PI / 2),  // Offset by -90 degrees
+    }));
   };
 
   useEffect(() => {
@@ -72,35 +131,52 @@ const EntityGraph = () => {
     fetch("/api/track-visit")
       .then((res) => res.json())
       .then((data) => {
-        // Sort by view count and take top N nodes
+        const center = getCenter();
+        const radius = Math.min(center.x, center.y) * 0.7;
+
+        // Sort and slice before distribution
         const topNodes = data
-          .filter(d => d.labels?.length > 0)
-          .sort((a, b) => b.count - a.count)
-          .slice(0, MAX_VISIBLE_NODES);
-
-        console.log("Node stats:", {
-          total: data.length,
-          classified: data.filter(d => d.labels?.length > 0).length,
-          showing: topNodes.length,
-          labels: new Set(topNodes.flatMap(d => d.labels || [])).size
-        });
-
-        const transformedNodes = topNodes.map((entity: Node, index: number) => {
-          const angle = (index / topNodes.length) * Math.PI * 2;
-          const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
-
-          return {
+          .sort((a: { count: number }, b: { count: number }) => b.count - a.count)
+          .slice(0, MAX_VISIBLE_NODES)
+          .map((entity: Node) => ({
             ...entity,
-            x: (dimensions.width * 0.5) + (radius * Math.cos(angle)),
-            y: (dimensions.height * 0.5) + (radius * Math.sin(angle)),
-            size: calculateNodeSize(entity.count, topNodes),
-            labels: entity.labels || [],
-          };
-        });
+            size: calculateNodeSize(entity.count, data.slice(0, MAX_VISIBLE_NODES)),
+            labels: entity.labels || [], // Keep existing labels if any
+          }));
 
-        setNodes(transformedNodes);
-        const newEdges = calculateEdges(transformedNodes);
-        setEdges(newEdges);
+        // Distribute nodes evenly
+        const distributedNodes = distributeNodes(topNodes, center, radius);
+        setNodes(distributedNodes);
+
+        // Only classify nodes that don't have labels
+        const nodesToClassify = distributedNodes.filter(node => !node.labels?.length);
+
+        if (nodesToClassify.length > 0) {
+          Promise.all(nodesToClassify.map(node =>
+            fetch("/api/classify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title: node.title })
+            }).then(res => res.json())
+          )).then(classifications => {
+            // Create a map of new classifications
+            const newClassifications = new Map(
+              nodesToClassify.map((node, i) => [node.title, classifications[i].labels || []])
+            );
+
+            const nodesWithLabels = distributedNodes.map(node => ({
+              ...node,
+              labels: newClassifications.get(node.title) || node.labels || [],
+              x: node.x,
+              y: node.y
+            }));
+            setNodes(nodesWithLabels);
+            setEdges(calculateEdges());
+          });
+        } else {
+          // If all nodes have labels, just calculate edges
+          setEdges(calculateEdges());
+        }
       });
   }, [dimensions]);
 
@@ -120,13 +196,20 @@ const EntityGraph = () => {
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  // Get unique labels for legend - memoized to prevent recalculation
+  // Get unique labels for legend - memoized to prevent recalculation and limit to top 5
   const uniqueLabels = useMemo(() => {
-    const labels = new Set<string>();
+    const labelCounts = new Map<string, number>();
     nodes.forEach(node => {
-      node.labels?.forEach(label => labels.add(label));
+      node.labels?.forEach(label =>
+        labelCounts.set(label, (labelCounts.get(label) || 0) + 1)
+      );
     });
-    return Array.from(labels);
+
+    // Sort by frequency and take top 5
+    return Array.from(labelCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([label]) => label);
   }, [nodes]);
 
   // Only log unique labels when they change and exist
@@ -136,10 +219,164 @@ const EntityGraph = () => {
     }
   }, [uniqueLabels]);
 
+  // Add CSS class for node transitions
+  const getNodeStyle = useCallback((index: number) => {
+    return {
+      opacity: nodeVisibility[index] ? 1 : 0,
+      transition: `opacity 150ms ${index * 15}ms, transform 150ms ${index * 15}ms`
+    };
+  }, [nodeVisibility]);
+
+  // Single effect to trigger all nodes
+  useEffect(() => {
+    if (nodes.length > 0) {
+      // Start all nodes as invisible
+      setNodeVisibility(new Array(nodes.length).fill(false));
+      // Trigger reflow
+      requestAnimationFrame(() => {
+        setNodeVisibility(new Array(nodes.length).fill(true));
+      });
+    }
+  }, [nodes]);
+
+  // Simplify node opacity handling
+  const getNodeOpacity = useCallback((node: Node, index: number) => {
+    if (!nodeVisibility[index]) return 0;
+    return hoveredLabel ?
+      (node.labels?.includes(hoveredLabel) ? 1 : 0.4) :
+      0.8;
+  }, [nodeVisibility, hoveredLabel]);
+
+  // Simplify node color handling
+  const getNodeColor = (node: Node, index: number) => {
+    if (!node.labels?.length) {
+      return 'hsla(0, 0%, 75%, 0.7)';
+    }
+
+    if (hoveredLabel) {
+      return node.labels.includes(hoveredLabel)
+        ? (categoryColors.get(hoveredLabel) || `hsla(${index * 55}, 70%, 65%, 0.9)`)
+        : 'hsla(0, 0%, 75%, 0.4)';
+    }
+
+    return categoryColors.get(node.labels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`;
+  };
+
+  // Enhance edge styling for category-colored electricity
+  const getEdgeStyle = (edge: Edge) => {
+    const isHighlighted = hoveredLabel && edge.labels.includes(hoveredLabel);
+
+    if (isHighlighted) {
+      const categoryColor = categoryColors.get(hoveredLabel!) || 'hsl(210, 100%, 75%)';
+      const hue = parseInt(categoryColor.match(/hsl\((\d+)/)?.[1] || '210');
+
+      const dashLength = 1.5 + Math.sin(time * 0.1) * 0.5;
+      const gapLength = 1.5 + Math.cos(time * 0.15) * 0.5;
+      const flicker = 0.4 + Math.sin(time * 0.3) * 0.1;
+
+      return {
+        stroke: `hsl(${hue}, 80%, 75%, ${flicker})`,
+        filter: 'url(#glow)',
+        strokeWidth: 1.0,
+        strokeDasharray: `${dashLength},${gapLength}`,
+        strokeDashoffset: -time % 8,
+        transition: 'stroke 0.3s ease-in-out'
+      };
+    }
+
+    return {
+      stroke: 'rgba(255, 255, 255, 0.2)', // Increased visibility for latent connections
+      strokeWidth: 0.3,
+      strokeDasharray: '2,4',
+      transition: 'all 0.3s ease-in-out'
+    };
+  };
+
+  // Enhance SVG filters for better glow effect
+  const SvgFilters = () => (
+    <defs>
+      <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="1.5" result="coloredBlur" />
+        <feColorMatrix
+          in="coloredBlur"
+          type="matrix"
+          values="0 0 0 0 0.5
+                  0 0 0 0 0.7
+                  0 0 0 0 1
+                  0 0 0 1 0"
+        />
+        <feMerge>
+          <feMergeNode in="coloredBlur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+    </defs>
+  );
+
+  // Add category colors
+  const categoryColors = useMemo(() => {
+    const colors = new Map<string, string>();
+
+    uniqueLabels.forEach((label, index) => {
+      // Generate a pleasing HSL color
+      const hue = (index * 137.508) % 360; // Golden angle approximation
+      colors.set(label, `hsl(${hue}, 70%, 65%)`);
+    });
+
+    return colors;
+  }, [uniqueLabels]);
+
+  useEffect(() => {
+    const animate = () => {
+      setTime(prev => {
+        console.log('Time:', prev); // Debug log
+        return prev + 1;
+      });
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, []);
+
+  // Add connection strength calculation using Fourier-like harmonics
+  const getConnectionStrength = useCallback((edge: Edge, time: number) => {
+    const baseStrength = edge.strength;
+    const sourceCount = edge.source.count || 1;
+    const targetCount = edge.target.count || 1;
+
+    // Create harmonic series based on view counts
+    const harmonics = [1, 2, 3].map(n => {
+      const amplitude = 1 / (n * n);
+      const frequency = n * 0.2;
+      return Math.sin(time * frequency) * amplitude;
+    });
+
+    // Combine harmonics with base strength
+    const harmonicFactor = harmonics.reduce((sum, h) => sum + h, 0) + 1;
+
+    // Scale by log of combined view counts
+    const viewFactor = Math.log10(sourceCount + targetCount) * 0.1;
+
+    return baseStrength * harmonicFactor * (1 + viewFactor);
+  }, []);
+
+  useEffect(() => {
+    if (containerRef.current && nodes.length > 0) {
+      const centerPoint = getCenter();
+      const newEdges = calculateEdges();
+      setEdges(newEdges);
+    }
+  }, [containerRef, nodes, calculateEdges, getCenter]);
+
   return (
     <div ref={containerRef} className="fixed inset-0 z-0">
-      <svg width="100%" height="100%" className="z-10">
-        {/* Draw edges first so they appear behind nodes */}
+      <svg ref={svgRef} width="100%" height="100%" className="z-10">
+        <SvgFilters />
         <g className="edges">
           {edges.map((edge, i) => (
             <line
@@ -148,44 +385,49 @@ const EntityGraph = () => {
               y1={edge.source.y}
               x2={edge.target.x}
               y2={edge.target.y}
-              stroke={hoveredLabel === edge.label ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)'}
-              strokeWidth={hoveredLabel === edge.label ? 2 : 1}
-              className="transition-all duration-150"
+              style={getEdgeStyle(edge)}
+              className="transition-all duration-300"
             />
           ))}
         </g>
 
-        {nodes.map((node, i) => (
-          <g
-            key={node.slug}
-            transform={`translate(${node.x},${node.y})`}
-            onClick={() => router.push(`/wiki/${node.slug}`)}
-            className="group cursor-pointer"
-          >
-            <circle
-              r={node.size}
-              fill={`hsla(${i * 55}, 80%, 65%, ${hoveredLabel ?
-                (node.labels?.includes(hoveredLabel) ? 0.9 : 0.2) :
-                0.7
-                })`}
-              stroke="white"
-              strokeWidth={0.5}
-              className="transition-all duration-150 hover:opacity-90 hover:scale-110"
-            />
-            <text
-              dy="-10"
-              textAnchor="middle"
-              className="text-xs fill-white opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
+        {nodes.map((node, i) => {
+          return (
+            <g
+              key={node.slug}
+              transform={`translate(${node.x},${node.y})`}
+              onClick={() => router.push(`/wiki/${node.slug}`)}
+              className="group cursor-pointer"
+              style={getNodeStyle(i)}
             >
-              {node.title}
-            </text>
-          </g>
-        ))}
+              <circle
+                r={node.size}
+                fill={getNodeColor(node, i)}
+                stroke="rgba(255, 255, 255, 0.3)"
+                strokeWidth={0.25}
+                className="transition-all duration-150 hover:opacity-90 hover:scale-110"
+                transform={`scale(${nodeVisibility[i] ? 1 : 0.5})`}
+              />
+              <text
+                dy="-10"
+                textAnchor="middle"
+                className={`text-xs fill-white transition-opacity duration-150 pointer-events-none ${hoveredLabel && node.labels?.includes(hoveredLabel)
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100'
+                  }`}
+              >
+                {node.title}
+              </text>
+            </g>
+          );
+        })}
       </svg>
 
       {/* Label legend with higher z-index */}
-      <div className="fixed bottom-4 left-4 p-4 bg-gray-900/90 rounded-lg z-20 shadow-lg">
-        <div className="text-xs text-gray-200 font-medium mb-2">Categories</div>
+      <div className="fixed top-4 left-4 p-4 bg-gray-900/90 rounded-lg z-20 shadow-lg">
+        <div className="mb-2">
+          <div className="text-xs text-gray-200 font-medium">Categories</div>
+        </div>
         <div className="space-y-2">
           {uniqueLabels.map((label) => (
             <div
@@ -194,7 +436,10 @@ const EntityGraph = () => {
               onMouseEnter={() => setHoveredLabel(label)}
               onMouseLeave={() => setHoveredLabel(null)}
             >
-              <div className="w-2 h-2 rounded-full bg-white/80" />
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: categoryColors.get(label) }}
+              />
               <span className="text-xs text-white/90">{label}</span>
             </div>
           ))}
