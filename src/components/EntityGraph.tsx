@@ -46,6 +46,9 @@ const EntityGraph = () => {
   const [nodesLoaded, setNodesLoaded] = useState(false);
   const [labelsLoaded, setLabelsLoaded] = useState(false);
 
+  // Add a new theme state
+  const [isDarkTheme, setIsDarkTheme] = useState(false);
+
   // Track when labels are loaded via classification
   useEffect(() => {
     const hasLabels = nodes.some((node) => (node.labels || []).length > 0);
@@ -60,6 +63,27 @@ const EntityGraph = () => {
       setNodesLoaded(true);
     }
   }, [nodes, nodesLoaded]);
+
+  // Add useEffect to check theme after mount
+  useEffect(() => {
+    setIsDarkTheme(document.documentElement.classList.contains("dark"));
+
+    // Optional: Listen for theme changes
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === "class") {
+          setIsDarkTheme(document.documentElement.classList.contains("dark"));
+        }
+      });
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+
+    return () => observer.disconnect();
+  }, []);
 
   const calculateNodeSize = (count: number, data: { count: number }[]) => {
     const maxCount = Math.max(...data.map((d) => d.count));
@@ -276,7 +300,9 @@ const EntityGraph = () => {
       return node.labels.includes(hoveredLabel)
         ? categoryColors.get(hoveredLabel) ||
             `hsla(${index * 55}, 70%, 65%, 0.9)`
-        : "hsla(0, 0%, 75%, 0.4)";
+        : isDarkTheme
+          ? "hsla(0, 0%, 75%, 0.4)"
+          : "hsla(0, 0%, 25%, 0.4)";
     }
 
     return (
@@ -308,7 +334,7 @@ const EntityGraph = () => {
     }
 
     return {
-      stroke: "rgba(255, 255, 255, 0.2)", // Increased visibility for latent connections
+      stroke: isDarkTheme ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)",
       strokeWidth: 0.3,
       strokeDasharray: "2,4",
       transition: "all 0.3s ease-in-out",
@@ -323,10 +349,11 @@ const EntityGraph = () => {
         <feColorMatrix
           in="coloredBlur"
           type="matrix"
-          values="0 0 0 0 0.5
-                  0 0 0 0 0.7
-                  0 0 0 0 1
-                  0 0 0 1 0"
+          values={
+            isDarkTheme
+              ? "0 0 0 0 0.5  0 0 0 0 0.7  0 0 0 0 1  0 0 0 1 0"
+              : "0 0 0 0 0.2  0 0 0 0 0.4  0 0 0 0 0.8  0 0 0 1 0"
+          }
         />
         <feMerge>
           <feMergeNode in="coloredBlur" />
@@ -403,7 +430,11 @@ const EntityGraph = () => {
               <circle
                 r={node.size}
                 fill={getNodeColor(node, i)}
-                stroke="rgba(255, 255, 255, 0.3)"
+                stroke={
+                  isDarkTheme
+                    ? "rgba(255, 255, 255, 0.3)"
+                    : "rgba(0, 0, 0, 0.3)"
+                }
                 strokeWidth={0.25}
                 className="transition-all duration-150 hover:opacity-90 hover:scale-110"
                 transform={`scale(${nodeVisibility[i] ? 1 : 0.5})`}
@@ -411,11 +442,13 @@ const EntityGraph = () => {
               <text
                 dy="-10"
                 textAnchor="middle"
-                className={`text-xs fill-white transition-opacity duration-150 pointer-events-none ${
-                  hoveredLabel && node.labels?.includes(hoveredLabel)
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100"
-                }`}
+                className={`text-xs transition-opacity duration-150 pointer-events-none 
+                  ${isDarkTheme ? "fill-white" : "fill-gray-800"} 
+                  ${
+                    hoveredLabel && node.labels?.includes(hoveredLabel)
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100"
+                  }`}
               >
                 {node.title}
               </text>
@@ -424,26 +457,29 @@ const EntityGraph = () => {
         })}
       </svg>
 
-      {/* Label legend with higher z-index */}
-      <div className="fixed top-4 left-4 p-4 bg-gray-900/90 rounded-lg z-20 shadow-lg">
-        <div className="mb-2">
-          <div className="text-xs text-gray-200 font-medium">Categories</div>
-        </div>
-        <div className="space-y-2">
-          {uniqueLabels.map((label) => (
-            <div
-              key={label}
-              className="flex items-center space-x-2 cursor-pointer hover:bg-gray-800/50 px-2 py-1 rounded transition-colors"
-              onMouseEnter={() => setHoveredLabel(label)}
-              onMouseLeave={() => setHoveredLabel(null)}
-            >
+      {/* Replace the existing legend div with this new responsive version */}
+      <div className="fixed top-0 left-0 right-0 p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm z-20 transition-colors duration-200">
+        <div className="max-w-screen-lg mx-auto">
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {uniqueLabels.map((label) => (
               <div
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: categoryColors.get(label) }}
-              />
-              <span className="text-xs text-white/90">{label}</span>
-            </div>
-          ))}
+                key={label}
+                className="flex items-center space-x-2 cursor-pointer 
+                           hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
+                           px-3 py-1.5 rounded-full transition-colors"
+                onMouseEnter={() => setHoveredLabel(label)}
+                onMouseLeave={() => setHoveredLabel(null)}
+              >
+                <div
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: categoryColors.get(label) }}
+                />
+                <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
+                  {label}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
