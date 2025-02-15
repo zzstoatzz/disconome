@@ -52,7 +52,10 @@ bun dev
 - [Vercel Blob Storage](https://vercel.com/docs/storage/vercel-blob) for caching
 - [OpenAI API](https://openai.com/api/) via [Vercel AI SDK](https://sdk.vercel.ai/)
 
-## development log
+
+<details>
+<summary>dev log</summary>
+
 
 ### entity graph visualization
 Current state:
@@ -63,6 +66,9 @@ Current state:
 - ✅ Efficient classification system with blob storage versioning (v3)
 - ✅ Immediate node rendering with async classification loading
 - ✅ Top 5 most effective categories shown in legend
+- ✅ Responsive category display optimized for mobile
+- ✅ Full dark/light theme support with smooth transitions
+- ✅ Dynamic edge and node colors based on theme
 
 Still needed:
 - [ ] Performance optimization
@@ -77,6 +83,10 @@ Still needed:
   - Implement smarter category rotation based on connection strength
   - Add visual feedback during category cleanup
   - Consider hierarchical categories for better organization
+- [ ] Mobile interaction refinement
+  - Add touch-friendly node interactions
+  - Improve zoom and pan controls for touch devices
+  - Optimize hover states for touch interfaces
 
 Next steps:
 1. Implement WebGL renderer for better performance
@@ -84,9 +94,13 @@ Next steps:
 3. Improve category system with hierarchical organization
 4. Add visual feedback during cleanup operations
 5. Optimize classification batching and caching
+6. Enhance mobile touch interactions
 
 Technical debt to address:
 - Clean up old blob storage versions
 - Consolidate shared types and utilities
 - Add error boundaries for graph visualization
 - Improve test coverage for classification system
+- Refactor theme handling for better SSR compatibility
+
+</details>
