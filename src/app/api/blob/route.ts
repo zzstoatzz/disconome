@@ -9,16 +9,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Path is required" }, { status: 400 });
   }
 
-  const blobs = await list({
-    prefix: path,
-    token: process.env.BLOB_READ_WRITE_TOKEN,
-  });
+  try {
+    const result = await list({ prefix: path });
 
-  if (blobs.blobs.length > 0) {
-    const response = await fetch(blobs.blobs[0].url);
-    const data = await response.json();
-    return NextResponse.json(data);
+    if (result.blobs.length > 0) {
+      const response = await fetch(result.blobs[0].url);
+      const data = await response.json();
+      return NextResponse.json(data);
+    }
+
+    return NextResponse.json(null);
+  } catch (error) {
+    console.error("Error fetching blob:", error);
+    return NextResponse.json({ error: String(error) }, { status: 500 });
   }
-
-  return NextResponse.json(null);
 }

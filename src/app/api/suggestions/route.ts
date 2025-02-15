@@ -1,5 +1,6 @@
 // app/api/suggestions/route.ts
 import { NextResponse } from "next/server";
+import { StatsMap } from "@/types";
 
 const SAMPLE_SUGGESTIONS = [
   "Albert Einstein",
@@ -27,10 +28,7 @@ export async function GET(request: Request) {
   try {
     // Fetch viewed items from stats
     const response = await fetch(STATS_URL);
-    const stats = (await response.json()) as Record<
-      string,
-      { title: string; views: number }
-    >;
+    const stats = (await response.json()) as StatsMap;
 
     // Create a Map to handle duplicates, preferring stats entries over samples
     const itemsMap = new Map();
@@ -41,6 +39,7 @@ export async function GET(request: Request) {
         title: data.title,
         slug,
         count: data.views,
+        labels: data.labels,
       });
     });
 

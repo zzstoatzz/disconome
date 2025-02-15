@@ -1,62 +1,116 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 
-const MAX_NODES = 30; // We can adjust this number as needed
+type Node = {
+  slug: string;
+  x: number;
+  y: number;
+  size: number;
+  count: number;
+  title: string;
+  labels?: string[];
+  isClassified?: boolean;
+};
+
+type Edge = {
+  source: Node;
+  target: Node;
+  label: string;
+};
 
 const EntityGraph = () => {
-  const [nodes, setNodes] = useState([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-
-  // Fetch entities from the API
-  useEffect(() => {
-    fetch("/api/track-visit")
-      .then((res) => res.json())
-      .then((data) => {
-        // Sort by count and take top N nodes
-        const topNodes = data
-          .sort(
-            (a: { count: number }, b: { count: number }) => b.count - a.count,
-          )
-          .slice(0, MAX_NODES);
-
-        const centerX = dimensions.width * 0.5;
-        const centerY = dimensions.height * 0.5;
-        const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
-
-        const transformedNodes = topNodes.map(
-          (entity: { count: number }, index: number) => {
-            const angle = (index / topNodes.length) * Math.PI * 2;
-
-            return {
-              ...entity,
-              x: centerX + radius * Math.cos(angle),
-              y: centerY + radius * Math.sin(angle),
-              size: calculateNodeSize(entity.count, topNodes),
-            };
-          },
-        );
-        setNodes(transformedNodes);
-      })
-      .catch((error) => console.error("Error fetching entities:", error));
-  }, [dimensions]);
+  const animationRef = useRef<number>();
+  const dataFetchedRef = useRef(false); // Prevent duplicate fetches
+  const MAX_VISIBLE_NODES = 15; // Limit visible nodes for performance
 
   const calculateNodeSize = (count: number, data: { count: number }[]) => {
     const maxCount = Math.max(...data.map((d) => d.count));
-    const minSize = 4;
-    const maxSize = 12;
-    return minSize + (count / maxCount) * (maxSize - minSize);
+    return 6 + (count / maxCount) * 12; // Reduced from 8 + ... * 16
   };
+
+  // Calculate edges between nodes that share labels
+  const calculateEdges = (nodes: Node[]) => {
+    const newEdges: Edge[] = [];
+    const processedPairs = new Set<string>();
+
+    nodes.forEach((source) => {
+      nodes.forEach((target) => {
+        if (source === target) return;
+
+        const pairKey = [source.slug, target.slug].sort().join('-');
+        if (processedPairs.has(pairKey)) return;
+        processedPairs.add(pairKey);
+
+        const sharedLabels = source.labels?.filter(label =>
+          target.labels?.includes(label)
+        ) || [];
+
+        if (sharedLabels.length > 0) {
+          newEdges.push({
+            source,
+            target,
+            label: sharedLabels[0] // Use first shared label for simplicity
+          });
+        }
+      });
+    });
+    return newEdges;
+  };
+
+  useEffect(() => {
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    fetch("/api/track-visit")
+      .then((res) => res.json())
+      .then((data) => {
+        // Sort by view count and take top N nodes
+        const topNodes = data
+          .filter(d => d.labels?.length > 0)
+          .sort((a, b) => b.count - a.count)
+          .slice(0, MAX_VISIBLE_NODES);
+
+        console.log("Node stats:", {
+          total: data.length,
+          classified: data.filter(d => d.labels?.length > 0).length,
+          showing: topNodes.length,
+          labels: new Set(topNodes.flatMap(d => d.labels || [])).size
+        });
+
+        const transformedNodes = topNodes.map((entity: Node, index: number) => {
+          const angle = (index / topNodes.length) * Math.PI * 2;
+          const radius = Math.min(dimensions.width, dimensions.height) * 0.35;
+
+          return {
+            ...entity,
+            x: (dimensions.width * 0.5) + (radius * Math.cos(angle)),
+            y: (dimensions.height * 0.5) + (radius * Math.sin(angle)),
+            size: calculateNodeSize(entity.count, topNodes),
+            labels: entity.labels || [],
+          };
+        });
+
+        setNodes(transformedNodes);
+        const newEdges = calculateEdges(transformedNodes);
+        setEdges(newEdges);
+      });
+  }, [dimensions]);
 
   useEffect(() => {
     const updateDimensions = () => {
       if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
         setDimensions({
-          width: window.innerWidth,
-          height: window.innerHeight,
+          width: rect.width,
+          height: rect.height
         });
       }
     };
@@ -66,116 +120,88 @@ const EntityGraph = () => {
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  const handleNodeClick = (slug: string) => {
-    router.push(`/wiki/${slug}`);
-  };
+  // Get unique labels for legend - memoized to prevent recalculation
+  const uniqueLabels = useMemo(() => {
+    const labels = new Set<string>();
+    nodes.forEach(node => {
+      node.labels?.forEach(label => labels.add(label));
+    });
+    return Array.from(labels);
+  }, [nodes]);
 
-  // Add the style in a useEffect
+  // Only log unique labels when they change and exist
   useEffect(() => {
-    const style = document.createElement("style");
-    style.textContent = `
-            @keyframes fadeIn {
-                0% { opacity: 0; }
-                50% { opacity: 0; }  /* Stay invisible for half the duration */
-                100% { opacity: 1; }
-            }
-        `;
-    document.head.appendChild(style);
-
-    // Cleanup
-    return () => {
-      document.head.removeChild(style);
-    };
-  }, []); // Empty dependency array means this runs once on mount
+    if (uniqueLabels.length > 0) {
+      console.log("🏷️ Categories:", uniqueLabels.length);
+    }
+  }, [uniqueLabels]);
 
   return (
-    <div
-      ref={containerRef}
-      className="absolute inset-0 w-full h-full"
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 0, // Ensure graph is behind the leaderboard
-      }}
-    >
-      <svg
-        width="100%"
-        height="100%"
-        viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
-        className="bg-transparent"
-        style={{ position: "absolute" }}
-      >
-        {nodes.map(
-          (
-            node: {
-              slug: string;
-              x: number;
-              y: number;
-              size: number;
-              count: number;
-              title: string;
-            },
-            i: number,
-          ) => (
-            <g
-              key={node.slug}
-              transform={`translate(${node.x},${node.y})`}
-              onClick={() => handleNodeClick(node.slug)}
-              className="cursor-pointer group"
-              style={{
-                pointerEvents: "all",
-                animation: `fadeIn ${1 + i * 0.2}s ease-in forwards`,
-              }}
+    <div ref={containerRef} className="fixed inset-0 z-0">
+      <svg width="100%" height="100%" className="z-10">
+        {/* Draw edges first so they appear behind nodes */}
+        <g className="edges">
+          {edges.map((edge, i) => (
+            <line
+              key={`edge-${i}`}
+              x1={edge.source.x}
+              y1={edge.source.y}
+              x2={edge.target.x}
+              y2={edge.target.y}
+              stroke={hoveredLabel === edge.label ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.2)'}
+              strokeWidth={hoveredLabel === edge.label ? 2 : 1}
+              className="transition-all duration-150"
+            />
+          ))}
+        </g>
+
+        {nodes.map((node, i) => (
+          <g
+            key={node.slug}
+            transform={`translate(${node.x},${node.y})`}
+            onClick={() => router.push(`/wiki/${node.slug}`)}
+            className="group cursor-pointer"
+          >
+            <circle
+              r={node.size}
+              fill={`hsla(${i * 55}, 80%, 65%, ${hoveredLabel ?
+                (node.labels?.includes(hoveredLabel) ? 0.9 : 0.2) :
+                0.7
+                })`}
+              stroke="white"
+              strokeWidth={0.5}
+              className="transition-all duration-150 hover:opacity-90 hover:scale-110"
+            />
+            <text
+              dy="-10"
+              textAnchor="middle"
+              className="text-xs fill-white opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none"
             >
-              {/* Node circle with hover effects */}
-              <circle
-                r={node.size}
-                className="transition-all duration-800"
-                style={{
-                  fill: `hsl(${(i * 55) % 360}, 100%, ${65 + ((i * 5) % 15)}%)`,
-                  opacity: 0.25,
-                  stroke: "black",
-                  strokeWidth: 0.1,
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.opacity = "0.6";
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.opacity = "0.2";
-                }}
-              />
-
-              {/* Node label */}
-              <text
-                dy="-10"
-                textAnchor="middle"
-                className="fill-gray-700 dark:fill-gray-300 text-xs opacity-0 
-                                     group-hover:opacity-100 transition-opacity duration-300
-                                     font-mono select-none"
-              >
-                {node.title}
-              </text>
-
-              {/* View count */}
-              <text
-                dy="20"
-                textAnchor="middle"
-                className="fill-gray-500 dark:fill-gray-400 text-xs opacity-0 
-                                     group-hover:opacity-100 transition-opacity duration-300
-                                     select-none"
-              >
-                {node.count} views
-              </text>
-            </g>
-          ),
-        )}
+              {node.title}
+            </text>
+          </g>
+        ))}
       </svg>
+
+      {/* Label legend with higher z-index */}
+      <div className="fixed bottom-4 left-4 p-4 bg-gray-900/90 rounded-lg z-20 shadow-lg">
+        <div className="text-xs text-gray-200 font-medium mb-2">Categories</div>
+        <div className="space-y-2">
+          {uniqueLabels.map((label) => (
+            <div
+              key={label}
+              className="flex items-center space-x-2 cursor-pointer hover:bg-gray-800/50 px-2 py-1 rounded transition-colors"
+              onMouseEnter={() => setHoveredLabel(label)}
+              onMouseLeave={() => setHoveredLabel(null)}
+            >
+              <div className="w-2 h-2 rounded-full bg-white/80" />
+              <span className="text-xs text-white/90">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 };
 
-// Remove the style creation from outside the component
 export default EntityGraph;
