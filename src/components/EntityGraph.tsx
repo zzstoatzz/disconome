@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import { useRouter } from "next/navigation";
 
 type Node = {
@@ -42,7 +48,7 @@ const EntityGraph = () => {
 
   // Track when labels are loaded via classification
   useEffect(() => {
-    const hasLabels = nodes.some(node => (node.labels || []).length > 0);
+    const hasLabels = nodes.some((node) => (node.labels || []).length > 0);
     if (hasLabels && !labelsLoaded) {
       setLabelsLoaded(true);
     }
@@ -72,13 +78,13 @@ const EntityGraph = () => {
       nodes.forEach((target) => {
         if (source === target) return;
 
-        const pairKey = [source.slug, target.slug].sort().join('-');
+        const pairKey = [source.slug, target.slug].sort().join("-");
         if (processedPairs.has(pairKey)) return;
         processedPairs.add(pairKey);
 
-        const sharedLabels = source.labels?.filter(label =>
-          target.labels?.includes(label)
-        ) || [];
+        const sharedLabels =
+          source.labels?.filter((label) => target.labels?.includes(label)) ||
+          [];
 
         if (sharedLabels.length > 0) {
           const strength = (source.count + target.count) / 2;
@@ -86,9 +92,11 @@ const EntityGraph = () => {
             source,
             target,
             labels: sharedLabels,
-            label: hoveredLabel && sharedLabels.includes(hoveredLabel) ?
-              hoveredLabel : sharedLabels[0],
-            strength
+            label:
+              hoveredLabel && sharedLabels.includes(hoveredLabel)
+                ? hoveredLabel
+                : sharedLabels[0],
+            strength,
           });
         }
       });
@@ -109,18 +117,22 @@ const EntityGraph = () => {
     const rect = containerRef.current?.getBoundingClientRect();
     return {
       x: rect ? rect.width / 2 : dimensions.width / 2,
-      y: rect ? rect.height / 2 : dimensions.height / 2
+      y: rect ? rect.height / 2 : dimensions.height / 2,
     };
   }, [dimensions.width, dimensions.height]);
 
   // Update node distribution
-  const distributeNodes = (nodes: Node[], center: { x: number, y: number }, radius: number) => {
+  const distributeNodes = (
+    nodes: Node[],
+    center: { x: number; y: number },
+    radius: number,
+  ) => {
     const angleStep = (2 * Math.PI) / nodes.length;
 
     return nodes.map((node, i) => ({
       ...node,
       x: center.x + radius * Math.cos(i * angleStep - Math.PI / 2), // Start from top
-      y: center.y + radius * Math.sin(i * angleStep - Math.PI / 2),  // Offset by -90 degrees
+      y: center.y + radius * Math.sin(i * angleStep - Math.PI / 2), // Offset by -90 degrees
     }));
   };
 
@@ -136,11 +148,16 @@ const EntityGraph = () => {
 
         // Sort and slice before distribution
         const topNodes = data
-          .sort((a: { count: number }, b: { count: number }) => b.count - a.count)
+          .sort(
+            (a: { count: number }, b: { count: number }) => b.count - a.count,
+          )
           .slice(0, MAX_VISIBLE_NODES)
           .map((entity: Node) => ({
             ...entity,
-            size: calculateNodeSize(entity.count, data.slice(0, MAX_VISIBLE_NODES)),
+            size: calculateNodeSize(
+              entity.count,
+              data.slice(0, MAX_VISIBLE_NODES),
+            ),
             labels: entity.labels || [], // Keep existing labels if any
           }));
 
@@ -149,26 +166,33 @@ const EntityGraph = () => {
         setNodes(distributedNodes);
 
         // Only classify nodes that don't have labels
-        const nodesToClassify = distributedNodes.filter(node => !node.labels?.length);
+        const nodesToClassify = distributedNodes.filter(
+          (node) => !node.labels?.length,
+        );
 
         if (nodesToClassify.length > 0) {
-          Promise.all(nodesToClassify.map(node =>
-            fetch("/api/classify", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ title: node.title })
-            }).then(res => res.json())
-          )).then(classifications => {
+          Promise.all(
+            nodesToClassify.map((node) =>
+              fetch("/api/classify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: node.title }),
+              }).then((res) => res.json()),
+            ),
+          ).then((classifications) => {
             // Create a map of new classifications
             const newClassifications = new Map(
-              nodesToClassify.map((node, i) => [node.title, classifications[i].labels || []])
+              nodesToClassify.map((node, i) => [
+                node.title,
+                classifications[i].labels || [],
+              ]),
             );
 
-            const nodesWithLabels = distributedNodes.map(node => ({
+            const nodesWithLabels = distributedNodes.map((node) => ({
               ...node,
               labels: newClassifications.get(node.title) || node.labels || [],
               x: node.x,
-              y: node.y
+              y: node.y,
             }));
             setNodes(nodesWithLabels);
             setEdges(calculateEdges());
@@ -178,7 +202,7 @@ const EntityGraph = () => {
           setEdges(calculateEdges());
         }
       });
-  }, [dimensions]);
+  }, [dimensions, calculateEdges, getCenter]);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -186,7 +210,7 @@ const EntityGraph = () => {
         const rect = containerRef.current.getBoundingClientRect();
         setDimensions({
           width: rect.width,
-          height: rect.height
+          height: rect.height,
         });
       }
     };
@@ -199,9 +223,9 @@ const EntityGraph = () => {
   // Get unique labels for legend - memoized to prevent recalculation and limit to top 5
   const uniqueLabels = useMemo(() => {
     const labelCounts = new Map<string, number>();
-    nodes.forEach(node => {
-      node.labels?.forEach(label =>
-        labelCounts.set(label, (labelCounts.get(label) || 0) + 1)
+    nodes.forEach((node) => {
+      node.labels?.forEach((label) =>
+        labelCounts.set(label, (labelCounts.get(label) || 0) + 1),
       );
     });
 
@@ -220,12 +244,15 @@ const EntityGraph = () => {
   }, [uniqueLabels]);
 
   // Add CSS class for node transitions
-  const getNodeStyle = useCallback((index: number) => {
-    return {
-      opacity: nodeVisibility[index] ? 1 : 0,
-      transition: `opacity 150ms ${index * 15}ms, transform 150ms ${index * 15}ms`
-    };
-  }, [nodeVisibility]);
+  const getNodeStyle = useCallback(
+    (index: number) => {
+      return {
+        opacity: nodeVisibility[index] ? 1 : 0,
+        transition: `opacity 150ms ${index * 15}ms, transform 150ms ${index * 15}ms`,
+      };
+    },
+    [nodeVisibility],
+  );
 
   // Single effect to trigger all nodes
   useEffect(() => {
@@ -239,27 +266,22 @@ const EntityGraph = () => {
     }
   }, [nodes]);
 
-  // Simplify node opacity handling
-  const getNodeOpacity = useCallback((node: Node, index: number) => {
-    if (!nodeVisibility[index]) return 0;
-    return hoveredLabel ?
-      (node.labels?.includes(hoveredLabel) ? 1 : 0.4) :
-      0.8;
-  }, [nodeVisibility, hoveredLabel]);
-
   // Simplify node color handling
   const getNodeColor = (node: Node, index: number) => {
     if (!node.labels?.length) {
-      return 'hsla(0, 0%, 75%, 0.7)';
+      return "hsla(0, 0%, 75%, 0.7)";
     }
 
     if (hoveredLabel) {
       return node.labels.includes(hoveredLabel)
-        ? (categoryColors.get(hoveredLabel) || `hsla(${index * 55}, 70%, 65%, 0.9)`)
-        : 'hsla(0, 0%, 75%, 0.4)';
+        ? categoryColors.get(hoveredLabel) ||
+            `hsla(${index * 55}, 70%, 65%, 0.9)`
+        : "hsla(0, 0%, 75%, 0.4)";
     }
 
-    return categoryColors.get(node.labels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`;
+    return (
+      categoryColors.get(node.labels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`
+    );
   };
 
   // Enhance edge styling for category-colored electricity
@@ -267,8 +289,9 @@ const EntityGraph = () => {
     const isHighlighted = hoveredLabel && edge.labels.includes(hoveredLabel);
 
     if (isHighlighted) {
-      const categoryColor = categoryColors.get(hoveredLabel!) || 'hsl(210, 100%, 75%)';
-      const hue = parseInt(categoryColor.match(/hsl\((\d+)/)?.[1] || '210');
+      const categoryColor =
+        categoryColors.get(hoveredLabel!) || "hsl(210, 100%, 75%)";
+      const hue = parseInt(categoryColor.match(/hsl\((\d+)/)?.[1] || "210");
 
       const dashLength = 1.5 + Math.sin(time * 0.1) * 0.5;
       const gapLength = 1.5 + Math.cos(time * 0.15) * 0.5;
@@ -276,19 +299,19 @@ const EntityGraph = () => {
 
       return {
         stroke: `hsl(${hue}, 80%, 75%, ${flicker})`,
-        filter: 'url(#glow)',
+        filter: "url(#glow)",
         strokeWidth: 1.0,
         strokeDasharray: `${dashLength},${gapLength}`,
         strokeDashoffset: -time % 8,
-        transition: 'stroke 0.3s ease-in-out'
+        transition: "stroke 0.3s ease-in-out",
       };
     }
 
     return {
-      stroke: 'rgba(255, 255, 255, 0.2)', // Increased visibility for latent connections
+      stroke: "rgba(255, 255, 255, 0.2)", // Increased visibility for latent connections
       strokeWidth: 0.3,
-      strokeDasharray: '2,4',
-      transition: 'all 0.3s ease-in-out'
+      strokeDasharray: "2,4",
+      transition: "all 0.3s ease-in-out",
     };
   };
 
@@ -328,8 +351,8 @@ const EntityGraph = () => {
 
   useEffect(() => {
     const animate = () => {
-      setTime(prev => {
-        console.log('Time:', prev); // Debug log
+      setTime((prev) => {
+        console.log("Time:", prev); // Debug log
         return prev + 1;
       });
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -343,31 +366,8 @@ const EntityGraph = () => {
     };
   }, []);
 
-  // Add connection strength calculation using Fourier-like harmonics
-  const getConnectionStrength = useCallback((edge: Edge, time: number) => {
-    const baseStrength = edge.strength;
-    const sourceCount = edge.source.count || 1;
-    const targetCount = edge.target.count || 1;
-
-    // Create harmonic series based on view counts
-    const harmonics = [1, 2, 3].map(n => {
-      const amplitude = 1 / (n * n);
-      const frequency = n * 0.2;
-      return Math.sin(time * frequency) * amplitude;
-    });
-
-    // Combine harmonics with base strength
-    const harmonicFactor = harmonics.reduce((sum, h) => sum + h, 0) + 1;
-
-    // Scale by log of combined view counts
-    const viewFactor = Math.log10(sourceCount + targetCount) * 0.1;
-
-    return baseStrength * harmonicFactor * (1 + viewFactor);
-  }, []);
-
   useEffect(() => {
     if (containerRef.current && nodes.length > 0) {
-      const centerPoint = getCenter();
       const newEdges = calculateEdges();
       setEdges(newEdges);
     }
@@ -411,10 +411,11 @@ const EntityGraph = () => {
               <text
                 dy="-10"
                 textAnchor="middle"
-                className={`text-xs fill-white transition-opacity duration-150 pointer-events-none ${hoveredLabel && node.labels?.includes(hoveredLabel)
-                  ? 'opacity-100'
-                  : 'opacity-0 group-hover:opacity-100'
-                  }`}
+                className={`text-xs fill-white transition-opacity duration-150 pointer-events-none ${
+                  hoveredLabel && node.labels?.includes(hoveredLabel)
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100"
+                }`}
               >
                 {node.title}
               </text>

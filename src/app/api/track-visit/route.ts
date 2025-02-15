@@ -6,9 +6,13 @@ const STATS_PATH = "stats/views.json";
 const CACHE_MAX_AGE = 300; // 5 minutes, maximum edge cache time
 const BASE_URL = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
-  : 'http://localhost:3000';
+  : "http://localhost:3000";
 
-const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 5000) => {
+const fetchWithTimeout = async (
+  url: string,
+  options: RequestInit = {},
+  timeout = 5000,
+): Promise<Response> => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
@@ -33,7 +37,10 @@ const BATCH_SIZE = 10; // Process 10 unclassified items at a time
 const DEBOUNCE_DELAY = 100; // ms
 
 // Process unclassified items sequentially
-async function processUnclassifiedItems(items: [string, any][], cachedStats: StatsMap) {
+const processUnclassifiedItems = async (
+  items: [string, { title: string }][],
+  stats: StatsMap,
+) => {
   let hasUpdates = false;
   const batchPromises = [];
 
@@ -41,26 +48,26 @@ async function processUnclassifiedItems(items: [string, any][], cachedStats: Sta
   for (let i = 0; i < items.length; i += BATCH_SIZE) {
     const batch = items.slice(i, i + BATCH_SIZE);
     const promise = new Promise(async (resolve) => {
-      await new Promise(r => setTimeout(r, i * DEBOUNCE_DELAY)); // Stagger requests
+      await new Promise((r) => setTimeout(r, i * DEBOUNCE_DELAY)); // Stagger requests
 
       for (const [slug, data] of batch) {
         try {
           const classifyResponse = await fetch(`${BASE_URL}/api/classify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               title: data.title,
-              labelCounts: cachedStats[slug]?.labels?.length ?
-                { [cachedStats[slug].labels[0]]: 1 } :
-                {}
-            })
+              labelCounts: stats[slug]?.labels?.length
+                ? { [stats[slug].labels[0]]: 1 }
+                : {},
+            }),
           });
 
           if (classifyResponse.ok) {
             const classification = await classifyResponse.json();
             if (classification.labels) {
-              cachedStats[slug].labels = classification.labels;
-              cachedStats[slug].lastClassified = Date.now();
+              stats[slug].labels = classification.labels;
+              stats[slug].lastClassified = Date.now();
               hasUpdates = true;
             }
           }
@@ -75,7 +82,7 @@ async function processUnclassifiedItems(items: [string, any][], cachedStats: Sta
 
   await Promise.all(batchPromises);
   return hasUpdates;
-}
+};
 
 export async function POST(req: Request) {
   try {
@@ -83,7 +90,7 @@ export async function POST(req: Request) {
 
     // Get current stats
     const { blobs } = await list({ prefix: "stats/" });
-    const statsBlob = blobs.find(b => b.pathname === STATS_PATH);
+    const statsBlob = blobs.find((b) => b.pathname === STATS_PATH);
     let stats: StatsMap = {};
 
     if (statsBlob) {
@@ -95,8 +102,8 @@ export async function POST(req: Request) {
     if (stats[slug] && !stats[slug].labels) {
       try {
         const classifyResponse = await fetch(`${BASE_URL}/api/classify`, {
-          method: 'POST',
-          body: JSON.stringify({ title })
+          method: "POST",
+          body: JSON.stringify({ title }),
         });
 
         if (classifyResponse.ok) {
@@ -120,7 +127,7 @@ export async function POST(req: Request) {
     await put(STATS_PATH, JSON.stringify(stats), {
       access: "public",
       addRandomSuffix: false,
-      cacheControlMaxAge: CACHE_MAX_AGE
+      cacheControlMaxAge: CACHE_MAX_AGE,
     });
 
     return NextResponse.json(stats);
@@ -133,23 +140,23 @@ export async function POST(req: Request) {
 export async function GET() {
   try {
     // Use cached data if available and fresh
-    if (cachedStats && (Date.now() - lastFetch < CACHE_DURATION)) {
+    if (cachedStats && Date.now() - lastFetch < CACHE_DURATION) {
       return NextResponse.json(
         Object.entries(cachedStats)
-          .filter(([_, data]) => data.labels?.length && data.labels?.length > 0)
-          .map(([slug, data]) => ({
-            slug,
+          .filter(([, data]) => data.labels?.length && data.labels?.length > 0)
+          .map(([, data]) => ({
+            slug: data.title.toLowerCase().replace(/\s+/g, "-"),
             title: data.title,
             count: data.views,
             labels: data.labels,
             isClassified: !!data.lastClassified,
           }))
-          .sort((a, b) => b.count - a.count)
+          .sort((a, b) => b.count - a.count),
       );
     }
 
     const { blobs } = await list({ prefix: "stats/" });
-    const statsBlob = blobs.find(b => b.pathname === STATS_PATH);
+    const statsBlob = blobs.find((b) => b.pathname === STATS_PATH);
 
     if (!statsBlob) {
       console.warn("No stats blob found");
@@ -166,32 +173,39 @@ export async function GET() {
     lastFetch = Date.now();
 
     console.log("Stats loaded:", {
-      total: Object.keys(cachedStats).length,
-      classified: Object.values(cachedStats).filter(d => d.labels?.length > 0).length
+      total: cachedStats ? Object.keys(cachedStats).length : 0,
+      classified: cachedStats
+        ? Object.values(cachedStats).filter(
+            (d) => d.labels?.length && d.labels?.length > 0,
+          ).length
+        : 0,
     });
 
     // Get classified nodes for display
-    const sortedStats = Object.entries(cachedStats)
-      .filter(([_, data]) => data.labels?.length && data.labels?.length > 0)
-      .map(([slug, data]) => ({
-        slug,
+    const sortedStats = Object.entries(cachedStats || {})
+      .filter(([, data]) => data.labels?.length && data.labels?.length > 0)
+      .map(([, data]) => ({
+        slug: data.title.toLowerCase().replace(/\s+/g, "-"),
         title: data.title,
         count: data.views,
         labels: data.labels,
-        isClassified: true
+        isClassified: true,
       }))
       .sort((a, b) => b.count - a.count);
 
     // Get batch of unclassified items
-    const unclassifiedItems = Object.entries(cachedStats)
-      .filter(([_, data]) => !data.labels?.length)
+    const unclassifiedItems = Object.entries(cachedStats || {})
+      .filter(([, data]) => !data.labels?.length)
       .slice(0, BATCH_SIZE);
 
     if (unclassifiedItems.length > 0) {
       console.log(`Processing ${unclassifiedItems.length} unclassified items`);
 
       // Process items in parallel
-      const hasUpdates = await processUnclassifiedItems(unclassifiedItems, cachedStats);
+      const hasUpdates = await processUnclassifiedItems(
+        unclassifiedItems,
+        cachedStats || {},
+      );
 
       if (hasUpdates) {
         console.log("Updated stats saved");
