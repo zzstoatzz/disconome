@@ -8,3 +8,7 @@ export const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 export const PORTAL_BLUE = "40, 90, 255";
 export const MAX_SPARKS = 50;
 export const MAX_TRAIL_LENGTH = 5;
+
+// Ignore lists
+export const IGNORED_LABELS = new Set(["Innovation", "Innovations"]);
+export const IGNORED_PAGES = new Set([]); // Empty for now, ready for future

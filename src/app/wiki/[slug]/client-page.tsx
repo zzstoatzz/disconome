@@ -21,6 +21,7 @@ const schema = z.object({
 interface WikiData {
   extract: string;
   title: string;
+  url?: string;
 }
 
 async function getWikiData(name: string) {
@@ -54,6 +55,7 @@ async function getWikiData(name: string) {
     return {
       extract: page.extract,
       title: page.title,
+      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title)}`,
     };
   } catch (error) {
     console.error("Error fetching Wikipedia data:", error);
@@ -211,11 +213,27 @@ export default function ClientPage({ slug }: { slug: string }) {
           <span className="mr-2">←</span>
           Back to Search
         </Link>
+        {wikiData.url && (
+          <a
+            href={wikiData.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center text-blue-500 hover:text-blue-600 transition-colors mr-16"
+          >
+            <span>View on Wikipedia</span>
+            <span className="ml-1">↗</span>
+          </a>
+        )}
       </nav>
 
-      <h1 className="text-4xl font-mono mb-8 text-gray-900 dark:text-white">
-        {wikiData.title}
-      </h1>
+      <div className="mb-8">
+        <h1 className="text-4xl font-mono mb-2 text-gray-900 dark:text-white">
+          {wikiData.title}
+        </h1>
+        <div className="text-sm text-gray-600 dark:text-gray-400">
+          From Wikipedia, the free encyclopedia
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Left side: Events */}

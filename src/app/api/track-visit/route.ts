@@ -37,7 +37,8 @@ const CACHE_DURATION = 60000; // 1 minute
 const BATCH_SIZE = 10; // Process 10 unclassified items at a time
 const DEBOUNCE_DELAY = 100; // ms
 
-const RECENCY_WEIGHT = 0.3; // 30% weight for recency vs pure view count
+const RECENCY_WEIGHT = 0.6; // Increased from 0.3 to give more weight to recent views
+const TIME_DECAY = 24 * 60 * 60 * 1000; // One day in milliseconds
 const RANDOM_NEW_NODES = 3; // Number of random unclassified nodes to include
 
 // Process unclassified items sequentially
@@ -134,13 +135,36 @@ export async function POST(req: Request) {
       }
     }
 
-    // Update entity stats with concurrency protection
-    const timestamp = Date.now();
+    // Classify immediately if unclassified
+    if (!stats[slug]?.labels?.length) {
+      try {
+        const classifyResponse = await fetch(`${BASE_URL}/api/classify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+
+        if (classifyResponse.ok) {
+          const classification = await classifyResponse.json();
+          if (classification.labels?.length) {
+            stats[slug] = {
+              ...stats[slug],
+              labels: classification.labels,
+              lastClassified: Date.now(),
+            };
+          }
+        }
+      } catch (error) {
+        console.error("Classification failed:", error);
+      }
+    }
+
+    // Update entity stats
     stats[slug] = {
       ...stats[slug],
       title,
       views: (stats[slug]?.views || 0) + 1,
-      lastClassified: timestamp,
+      lastClassified: stats[slug]?.lastClassified || Date.now(),
     };
 
     try {
@@ -204,8 +228,8 @@ export async function GET() {
       total: cachedStats ? Object.keys(cachedStats).length : 0,
       classified: cachedStats
         ? Object.values(cachedStats).filter(
-            (d) => d.labels?.length && d.labels?.length > 0,
-          ).length
+          (d) => d.labels?.length && d.labels?.length > 0,
+        ).length
         : 0,
     });
 
@@ -213,13 +237,14 @@ export async function GET() {
     const scoredStats = Object.entries(cachedStats || {})
       .filter(([, data]) => data.labels?.length && data.labels?.length > 0)
       .map(([, data]) => {
-        const recencyScore = data.lastClassified
-          ? (Date.now() - data.lastClassified) / (24 * 60 * 60 * 1000) // Days since last view
-          : 1000; // High number for old entries
+        // Calculate time decay factor using only lastClassified
+        const timeSinceLastView = Date.now() - (data.lastClassified || 0);
+        const recencyScore = Math.exp(-timeSinceLastView / TIME_DECAY);
 
+        // Combine view count with recency
         const score =
           (data.views || 0) * (1 - RECENCY_WEIGHT) +
-          (1 / recencyScore) * RECENCY_WEIGHT;
+          recencyScore * RECENCY_WEIGHT;
 
         return {
           slug: data.title.toLowerCase().replace(/\s+/g, "-"),
