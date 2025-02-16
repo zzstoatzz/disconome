@@ -133,7 +133,7 @@ function HomeContent() {
               type="text"
               value={query}
               onChange={handleQueryChange}
-              placeholder="enter something on wikipedia..."
+              placeholder="submit a wikipedia page to the discono.me"
               className="w-full p-4 pr-12 text-sm font-mono border-2 border-gray-200 dark:border-gray-700 
                        rounded-lg focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 
                        focus:ring-0 text-gray-700 dark:text-gray-100 placeholder-gray-400 
