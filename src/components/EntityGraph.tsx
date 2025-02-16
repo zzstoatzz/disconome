@@ -8,7 +8,12 @@ import React, {
   useCallback,
 } from "react";
 import { useRouter } from "next/navigation";
-import { MAX_VISIBLE_LABELS, MAX_VISIBLE_NODES } from "@/app/constants";
+import {
+  MAX_VISIBLE_LABELS,
+  MAX_VISIBLE_NODES,
+  IGNORED_LABELS,
+  IGNORED_PAGES
+} from "@/app/constants";
 type Node = {
   slug: string;
   x: number;
@@ -243,23 +248,27 @@ const EntityGraph = () => {
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  // Update uniqueLabels logic to only show categories with 2+ nodes
+  // Modify the uniqueLabels filtering to show more connections
   const uniqueLabels = useMemo(() => {
     const labelCounts = new Map<string, { count: number; nodeCount: number }>();
 
-    nodes.forEach((node) => {
-      node.labels?.forEach((label) => {
-        const current = labelCounts.get(label) || { count: 0, nodeCount: 0 };
-        labelCounts.set(label, {
-          count: current.count + (node.count || 0),
-          nodeCount: current.nodeCount + 1,
-        });
+    nodes
+      .filter(node => !IGNORED_PAGES.has(node.title as never))
+      .forEach((node) => {
+        (node.labels || [])
+          .filter(label => !IGNORED_LABELS.has(label))
+          .forEach((label) => {
+            const current = labelCounts.get(label) || { count: 0, nodeCount: 0 };
+            labelCounts.set(label, {
+              count: current.count + (node.count || 0),
+              nodeCount: current.nodeCount + 1,
+            });
+          });
       });
-    });
 
-    // Filter for labels that appear on 2+ nodes and sort by total view count
+    // Only show labels that have 2+ visible nodes
     return Array.from(labelCounts.entries())
-      .filter(([, stats]) => stats.nodeCount >= 2)
+      .filter(([, stats]) => stats.nodeCount >= 2) // Require 2+ nodes
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, MAX_VISIBLE_LABELS)
       .map(([label]) => label);
@@ -297,21 +306,23 @@ const EntityGraph = () => {
 
   // Simplify node color handling
   const getNodeColor = (node: Node, index: number) => {
-    if (!node.labels?.length) {
+    const validLabels = node.labels?.filter(label => !IGNORED_LABELS.has(label)) || [];
+
+    if (!validLabels.length) {
       return "hsla(0, 0%, 75%, 0.7)";
     }
 
     if (hoveredLabel) {
-      return node.labels.includes(hoveredLabel)
+      return validLabels.includes(hoveredLabel)
         ? categoryColors.get(hoveredLabel) ||
-            `hsla(${index * 55}, 70%, 65%, 0.9)`
+        `hsla(${index * 55}, 70%, 65%, 0.9)`
         : isDarkTheme
           ? "hsla(0, 0%, 75%, 0.4)"
           : "hsla(0, 0%, 25%, 0.4)";
     }
 
     return (
-      categoryColors.get(node.labels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`
+      categoryColors.get(validLabels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`
     );
   };
 
@@ -469,10 +480,9 @@ const EntityGraph = () => {
                 textAnchor="middle"
                 className={`text-xs transition-opacity duration-150 pointer-events-none 
                   ${isDarkTheme ? "fill-white" : "fill-gray-800"} 
-                  ${
-                    hoveredLabel && node.labels?.includes(hoveredLabel)
-                      ? "opacity-100"
-                      : "opacity-0 group-hover:opacity-100"
+                  ${hoveredLabel && node.labels?.includes(hoveredLabel)
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100"
                   }`}
               >
                 {node.title}
