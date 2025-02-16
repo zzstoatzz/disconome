@@ -71,20 +71,21 @@ function HomeContent() {
           <button
             className="p-2 rounded-full bg-white/90 dark:bg-gray-800/90 
                      shadow-lg backdrop-blur-sm hover:bg-white dark:hover:bg-gray-700 
-                     transition-all duration-200"
+                     transition-all duration-200 text-gray-800 dark:text-gray-200"
             aria-label="What is this?"
           >
             ?
           </button>
           <div
             className="absolute left-0 top-full mt-2 w-72 p-4 rounded-lg 
-                        bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm shadow-lg 
-                        invisible group-hover:visible opacity-0 group-hover:opacity-100 
-                        transition-all duration-200
-                        sm:w-72 w-[calc(100vw-2rem)] max-w-[90vw]"
+                      bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm shadow-lg 
+                      invisible group-hover:visible opacity-0 group-hover:opacity-100 
+                      transition-all duration-200
+                      sm:w-72 w-[calc(100vw-2rem)] max-w-[90vw]
+                      text-gray-800 dark:text-gray-200"
           >
             <h3 className="font-bold mb-2">What is this?</h3>
-            <p className="text-sm mb-2">
+            <p className="text-sm mb-2 text-gray-600 dark:text-gray-300">
               A graph of Wikipedia entities most viewed via this site. A
               wikipedia entity is just what I&apos;m calling the header of a
               wikipedia page + what an LLM produces as a structured timeline for
@@ -111,7 +112,8 @@ function HomeContent() {
           className="p-2 px-4 rounded-lg bg-white/90 dark:bg-gray-800/90 
                    shadow-lg backdrop-blur-sm hover:bg-white dark:hover:bg-gray-700 
                    transition-all duration-200 text-sm flex items-center gap-2
-                   sm:opacity-70 hover:opacity-100"
+                   sm:opacity-70 hover:opacity-100
+                   text-gray-800 dark:text-gray-200"
         >
           <span className="hidden sm:inline">random</span>
           <span>✧</span>
@@ -132,7 +134,7 @@ function HomeContent() {
               value={query}
               onChange={handleQueryChange}
               placeholder="enter something on wikipedia..."
-              className="w-full p-4 pr-12 text-lg font-mono border-2 border-gray-200 dark:border-gray-700 
+              className="w-full p-4 pr-12 text-sm font-mono border-2 border-gray-200 dark:border-gray-700 
                        rounded-lg focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 
                        focus:ring-0 text-gray-700 dark:text-gray-100 placeholder-gray-400 
                        dark:placeholder-gray-500 bg-white dark:bg-gray-800 shadow-sm
