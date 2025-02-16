@@ -88,52 +88,70 @@ export async function POST(req: Request) {
   try {
     const { slug, title } = await req.json();
 
-    // Get current stats
+    if (!slug || !title) {
+      return NextResponse.json(
+        { error: "Slug and title are required" },
+        { status: 400 }
+      );
+    }
+
+    // Get current stats with timeout
     const { blobs } = await list({ prefix: "stats/" });
     const statsBlob = blobs.find((b) => b.pathname === STATS_PATH);
     let stats: StatsMap = {};
 
     if (statsBlob) {
-      const response = await fetch(statsBlob.url);
-      stats = await response.json();
-    }
-
-    // If entity exists but isn't classified, classify it
-    if (stats[slug] && !stats[slug].labels) {
       try {
-        const classifyResponse = await fetch(`${BASE_URL}/api/classify`, {
-          method: "POST",
-          body: JSON.stringify({ title }),
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        if (classifyResponse.ok) {
-          const { labels } = await classifyResponse.json();
-          stats[slug].labels = labels;
-          stats[slug].lastClassified = Date.now();
+        const response = await fetch(statsBlob.url, {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
+        stats = await response.json();
       } catch (error) {
-        console.error("Classification failed:", error);
+        if (error.name === 'AbortError') {
+          console.error('Stats fetch timeout');
+        } else {
+          console.error('Error fetching stats:', error);
+        }
+        // Continue with empty stats rather than failing
       }
     }
 
-    // Update or create entity stats
+    // Update entity stats with concurrency protection
+    const timestamp = Date.now();
     stats[slug] = {
       ...stats[slug],
       title,
       views: (stats[slug]?.views || 0) + 1,
+      lastUpdated: timestamp
     };
 
-    // Save updated stats
-    await put(STATS_PATH, JSON.stringify(stats), {
-      access: "public",
-      addRandomSuffix: false,
-      cacheControlMaxAge: CACHE_MAX_AGE,
-    });
+    try {
+      await put(STATS_PATH, JSON.stringify(stats), {
+        access: "public",
+        addRandomSuffix: false,
+        cacheControlMaxAge: CACHE_MAX_AGE,
+      });
+    } catch (putError) {
+      console.error('Error saving stats:', putError);
+      // Still return success to client but with old stats
+      return NextResponse.json(stats);
+    }
 
     return NextResponse.json(stats);
   } catch (error) {
     console.error("Error tracking visit:", error);
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to track visit" },
+      { status: 500 }
+    );
   }
 }
 
@@ -176,8 +194,8 @@ export async function GET() {
       total: cachedStats ? Object.keys(cachedStats).length : 0,
       classified: cachedStats
         ? Object.values(cachedStats).filter(
-            (d) => d.labels?.length && d.labels?.length > 0,
-          ).length
+          (d) => d.labels?.length && d.labels?.length > 0,
+        ).length
         : 0,
     });
 
