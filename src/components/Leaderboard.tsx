@@ -1,29 +1,20 @@
 import Link from "next/link";
-import { useEffect, useState } from "react";
-
-interface LeaderboardEntry {
-  slug: string;
-  title: string;
-  count: number;
-}
+import { useData } from "@/hooks/useData";
+import { StatsMap } from "@/types";
+import { STATS_PATH } from "@/app/constants";
 
 export function Leaderboard() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const { data: stats, error } = useData<StatsMap>(STATS_PATH, {
+    refreshInterval: 30000 // Refresh every 30 seconds
+  });
 
-  useEffect(() => {
-    setIsLoading(true);
-    fetch("/api/track-visit")
-      .then((res) => res.json())
-      .then((data) => {
-        setLeaderboard(data);
-        setIsLoading(false);
-      })
-      .catch((error) => {
-        console.error("Error fetching leaderboard:", error);
-        setIsLoading(false);
-      });
-  }, []);
+  const isLoading = !stats && !error;
+
+  const sortedEntries = stats
+    ? Object.entries(stats)
+      .sort(([, a], [, b]) => (b.views || 0) - (a.views || 0))
+      .slice(0, 3)
+    : [];
 
   return (
     <div className="mt-12 relative z-10">
@@ -34,12 +25,12 @@ export function Leaderboard() {
         <div className="text-gray-600 text-center">
           Loading trending entities...
         </div>
-      ) : leaderboard.length > 0 ? (
+      ) : sortedEntries.length > 0 ? (
         <div className="space-y-2">
-          {leaderboard.slice(0, 3).map((entry, index) => (
+          {sortedEntries.map(([slug, entry], index) => (
             <Link
-              key={entry.slug}
-              href={`/wiki/${entry.slug}`}
+              key={slug}
+              href={`/wiki/${slug}`}
               className="flex items-center p-3 bg-white/90 dark:bg-gray-800/90 
                        rounded-lg shadow-sm 
                        hover:shadow-md hover:translate-x-0.5
@@ -58,7 +49,7 @@ export function Leaderboard() {
                   {entry.title}
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {entry.count} views
+                  {entry.views} views
                 </p>
               </div>
             </Link>

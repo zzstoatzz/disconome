@@ -1,0 +1,19 @@
+Priority 1: Robust Error & Concurrency Handling
+
+Enhance try/catch blocks (especially in async loops and fetches).
+Use cancellation tokens/AbortController to avoid race conditions.
+Priority 2: Performance & Caching
+
+Leverage memoization (or SWR) in client data fetching to reduce redundant network calls.
+Cache blob responses more aggressively to avoid repeated list/fetch cycles.
+Priority 3: Code Organization & Reusability
+
+Extract common logic (blob fetching, caching, error logging) into shared utilities.
+Simplify complex useEffects in EntityGraph with custom hooks.
+Priority 4: UI & Animation Optimization
+
+Optimize heavy state updates in EntityGraph and MouseTrail (consider refs to reduce re-renders).
+Improve accessibility (aria labels, focus management) on interactive components.
+Priority 5: Environment & Security
+
+Ensure environment variables and tokens are validated and securely managed.

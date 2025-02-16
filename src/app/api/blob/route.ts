@@ -1,5 +1,5 @@
-import { list } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { fetchBlobWithCache } from "@/utils/blob";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -10,17 +10,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await list({ prefix: path });
-
-    if (result.blobs.length > 0) {
-      const response = await fetch(result.blobs[0].url);
-      const data = await response.json();
-      return NextResponse.json(data);
-    }
-
-    return NextResponse.json(null);
+    const data = await fetchBlobWithCache(path);
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("Error fetching blob:", error);
-    return NextResponse.json({ error: String(error) }, { status: 500 });
+    console.error("Error in blob route:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch data" },
+      { status: 500 }
+    );
   }
 }
