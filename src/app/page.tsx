@@ -163,7 +163,7 @@ function HomeContent() {
         onClick={handleVisibilityToggle}
         className="fixed bottom-6 right-6 z-20 p-3 rounded-full bg-white/90 dark:bg-gray-800/90 
                  shadow-lg backdrop-blur-sm hover:bg-white dark:hover:bg-gray-700 
-                 transition-all duration-200"
+                 transition-all duration-200 text-gray-800 dark:text-gray-200"
         aria-label={isContentVisible ? "Enter zen mode" : "Exit zen mode"}
       >
         {isContentVisible ? "⌘" : "⎋"}
