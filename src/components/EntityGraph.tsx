@@ -8,7 +8,7 @@ import React, {
   useCallback,
 } from "react";
 import { useRouter } from "next/navigation";
-import { MAX_VISIBLE_LABELS } from "@/app/constants";
+import { MAX_VISIBLE_LABELS, MAX_VISIBLE_NODES } from "@/app/constants";
 type Node = {
   slug: string;
   x: number;
@@ -36,7 +36,6 @@ const EntityGraph = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const dataFetchedRef = useRef(false); // Prevent duplicate fetches
-  const MAX_VISIBLE_NODES = 32;
   const svgRef = useRef<SVGSVGElement>(null);
   const [time, setTime] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
@@ -244,18 +243,24 @@ const EntityGraph = () => {
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  // Get unique labels for legend - memoized to prevent recalculation and limit to top 7
+  // Update uniqueLabels logic to only show categories with 2+ nodes
   const uniqueLabels = useMemo(() => {
-    const labelCounts = new Map<string, number>();
+    const labelCounts = new Map<string, { count: number; nodeCount: number }>();
+
     nodes.forEach((node) => {
-      node.labels?.forEach((label) =>
-        labelCounts.set(label, (labelCounts.get(label) || 0) + 1),
-      );
+      node.labels?.forEach((label) => {
+        const current = labelCounts.get(label) || { count: 0, nodeCount: 0 };
+        labelCounts.set(label, {
+          count: current.count + (node.count || 0),
+          nodeCount: current.nodeCount + 1,
+        });
+      });
     });
 
-    // Sort by frequency and take top 7
+    // Filter for labels that appear on 2+ nodes and sort by total view count
     return Array.from(labelCounts.entries())
-      .sort((a, b) => b[1] - a[1])
+      .filter(([, stats]) => stats.nodeCount >= 2)
+      .sort((a, b) => b[1].count - a[1].count)
       .slice(0, MAX_VISIBLE_LABELS)
       .map(([label]) => label);
   }, [nodes]);

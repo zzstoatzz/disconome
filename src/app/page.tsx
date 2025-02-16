@@ -7,6 +7,7 @@ import { SearchSuggestions, Suggestion } from "@/components/SearchSuggestions";
 import { useSearch } from "@/hooks/useSearch";
 import { Leaderboard } from "@/components/Leaderboard";
 import EntityGraph from "@/components/EntityGraph";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
@@ -45,7 +46,9 @@ export default function Home() {
   return (
     <main className="min-h-screen p-4 relative grid place-items-center">
       <div className="fixed inset-0 transition-colors duration-500">
-        <EntityGraph />
+        <ErrorBoundary>
+          <EntityGraph />
+        </ErrorBoundary>
       </div>
 
       <div

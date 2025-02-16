@@ -1,6 +1,7 @@
 import { put, list } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { StatsMap } from "@/types";
+import { MAX_VISIBLE_NODES } from "@/app/constants";
 
 const STATS_PATH = "stats/views.json";
 const CACHE_MAX_AGE = 300; // 5 minutes, maximum edge cache time
@@ -36,6 +37,9 @@ const CACHE_DURATION = 60000; // 1 minute
 const BATCH_SIZE = 10; // Process 10 unclassified items at a time
 const DEBOUNCE_DELAY = 100; // ms
 
+const RECENCY_WEIGHT = 0.3; // 30% weight for recency vs pure view count
+const RANDOM_NEW_NODES = 3; // Number of random unclassified nodes to include
+
 // Process unclassified items sequentially
 const processUnclassifiedItems = async (
   items: [string, { title: string }][],
@@ -66,8 +70,14 @@ const processUnclassifiedItems = async (
           if (classifyResponse.ok) {
             const classification = await classifyResponse.json();
             if (classification.labels) {
-              stats[slug].labels = classification.labels;
-              stats[slug].lastClassified = Date.now();
+              // Initialize or update the stats entry
+              stats[slug] = {
+                ...stats[slug],
+                title: data.title,
+                views: stats[slug]?.views || 0,
+                labels: classification.labels,
+                lastClassified: Date.now(),
+              };
               hasUpdates = true;
             }
           }
@@ -91,7 +101,7 @@ export async function POST(req: Request) {
     if (!slug || !title) {
       return NextResponse.json(
         { error: "Slug and title are required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -106,7 +116,7 @@ export async function POST(req: Request) {
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         const response = await fetch(statsBlob.url, {
-          signal: controller.signal
+          signal: controller.signal,
         });
         clearTimeout(timeoutId);
 
@@ -115,10 +125,10 @@ export async function POST(req: Request) {
         }
         stats = await response.json();
       } catch (error) {
-        if (error.name === 'AbortError') {
-          console.error('Stats fetch timeout');
+        if (error instanceof Error && error.name === "AbortError") {
+          console.error("Stats fetch timeout");
         } else {
-          console.error('Error fetching stats:', error);
+          console.error("Error fetching stats:", error);
         }
         // Continue with empty stats rather than failing
       }
@@ -130,7 +140,7 @@ export async function POST(req: Request) {
       ...stats[slug],
       title,
       views: (stats[slug]?.views || 0) + 1,
-      lastUpdated: timestamp
+      lastClassified: timestamp,
     };
 
     try {
@@ -140,7 +150,7 @@ export async function POST(req: Request) {
         cacheControlMaxAge: CACHE_MAX_AGE,
       });
     } catch (putError) {
-      console.error('Error saving stats:', putError);
+      console.error("Error saving stats:", putError);
       // Still return success to client but with old stats
       return NextResponse.json(stats);
     }
@@ -150,7 +160,7 @@ export async function POST(req: Request) {
     console.error("Error tracking visit:", error);
     return NextResponse.json(
       { error: "Failed to track visit" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -194,43 +204,77 @@ export async function GET() {
       total: cachedStats ? Object.keys(cachedStats).length : 0,
       classified: cachedStats
         ? Object.values(cachedStats).filter(
-          (d) => d.labels?.length && d.labels?.length > 0,
-        ).length
+            (d) => d.labels?.length && d.labels?.length > 0,
+          ).length
         : 0,
     });
 
-    // Get classified nodes for display
-    const sortedStats = Object.entries(cachedStats || {})
+    // Calculate scores combining views and recency
+    const scoredStats = Object.entries(cachedStats || {})
       .filter(([, data]) => data.labels?.length && data.labels?.length > 0)
+      .map(([, data]) => {
+        const recencyScore = data.lastClassified
+          ? (Date.now() - data.lastClassified) / (24 * 60 * 60 * 1000) // Days since last view
+          : 1000; // High number for old entries
+
+        const score =
+          (data.views || 0) * (1 - RECENCY_WEIGHT) +
+          (1 / recencyScore) * RECENCY_WEIGHT;
+
+        return {
+          slug: data.title.toLowerCase().replace(/\s+/g, "-"),
+          title: data.title,
+          count: data.views,
+          labels: data.labels,
+          isClassified: true,
+          score,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_VISIBLE_NODES - RANDOM_NEW_NODES);
+
+    // Get random selection of unclassified items
+    const unclassifiedPool = Object.entries(cachedStats || {})
+      .filter(([, data]) => !data.labels?.length)
       .map(([, data]) => ({
         slug: data.title.toLowerCase().replace(/\s+/g, "-"),
         title: data.title,
-        count: data.views,
-        labels: data.labels,
-        isClassified: true,
-      }))
-      .sort((a, b) => b.count - a.count);
+        count: data.views || 0,
+        labels: [],
+        isClassified: false,
+      }));
 
-    // Get batch of unclassified items
-    const unclassifiedItems = Object.entries(cachedStats || {})
-      .filter(([, data]) => !data.labels?.length)
-      .slice(0, BATCH_SIZE);
+    // Randomly select a few unclassified items
+    const randomUnclassified = unclassifiedPool
+      .sort(() => Math.random() - 0.5)
+      .slice(0, RANDOM_NEW_NODES);
 
-    if (unclassifiedItems.length > 0) {
-      console.log(`Processing ${unclassifiedItems.length} unclassified items`);
+    // Combine scored and random items
+    const combinedStats = [...scoredStats, ...randomUnclassified];
 
-      // Process items in parallel
-      const hasUpdates = await processUnclassifiedItems(
-        unclassifiedItems,
+    // Process unclassified items in background
+    if (unclassifiedPool.length > 0) {
+      const itemsToClassify = [...randomUnclassified].map((item) => [
+        item.slug,
+        { title: item.title },
+      ]);
+
+      console.log(`Processing ${itemsToClassify.length} unclassified items`);
+
+      // Process items in parallel but don't await
+      processUnclassifiedItems(
+        itemsToClassify as [string, { title: string }][],
         cachedStats || {},
-      );
-
-      if (hasUpdates) {
-        console.log("Updated stats saved");
-      }
+      )
+        .then((hasUpdates) => {
+          if (hasUpdates) {
+            console.log("Updated stats saved");
+          }
+        })
+        .catch(console.error);
     }
 
-    return NextResponse.json(sortedStats);
+    return NextResponse.json(combinedStats);
   } catch (error) {
     console.error("Error fetching stats:", error);
     return NextResponse.json([]);
