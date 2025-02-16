@@ -1,1 +1,1 @@
-npx lint-staged && npm run build
+bun lint && bun run build

@@ -1,10 +1,11 @@
 # discono.me
 
-render a timeline for a given thing on wikipedia
+explore connections between wikipedia articles through an interactive knowledge graph
 
 ## features
 - 📊 Timeline generation for Wikipedia articles
 - 📈 Most viewed entities leaderboard
+- 🕸️ Dynamic entity graph with auto-categorization
 
 
 ## development
@@ -45,12 +46,14 @@ bun dev
 - `/api/lineage` - Generates timeline data for a given topic
 - `/api/track-visit` - Tracks page views and maintains leaderboard
 - `/api/blob` - Handles Vercel Blob storage operations
+- `/api/classify` - Auto-categorizes entities for graph visualization
 
 ## stack
 - [Next.js 14](https://nextjs.org/) with App Router
 - [Tailwind CSS](https://tailwindcss.com/) for styling
 - [Vercel Blob Storage](https://vercel.com/docs/storage/vercel-blob) for caching
 - [OpenAI API](https://openai.com/api/) via [Vercel AI SDK](https://sdk.vercel.ai/)
+- [SWR](https://swr.vercel.app/) for data fetching and caching
 
 
 <details>

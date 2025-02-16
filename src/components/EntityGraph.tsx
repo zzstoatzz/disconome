@@ -404,6 +404,27 @@ const EntityGraph = () => {
     }
   }, [containerRef, nodes, calculateEdges, getCenter]);
 
+  // Add handler for random node selection
+  useEffect(() => {
+    const handleRandomNode = () => {
+      // Filter for nodes with lower view counts (bottom 70%)
+      const sortedNodes = [...nodes].sort((a, b) => b.count - a.count);
+      const cutoffIndex = Math.floor(nodes.length * 0.3);
+      const lessViewedNodes = sortedNodes.slice(cutoffIndex);
+
+      // Select random node from less viewed nodes
+      if (lessViewedNodes.length > 0) {
+        const randomNode =
+          lessViewedNodes[Math.floor(Math.random() * lessViewedNodes.length)];
+        router.push(`/wiki/${randomNode.slug}`);
+      }
+    };
+
+    document.addEventListener("selectRandomNode", handleRandomNode);
+    return () =>
+      document.removeEventListener("selectRandomNode", handleRandomNode);
+  }, [nodes, router]);
+
   return (
     <div ref={containerRef} className="fixed inset-0 z-0">
       <svg ref={svgRef} width="100%" height="100%" className="z-10">
