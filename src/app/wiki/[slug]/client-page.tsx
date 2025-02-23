@@ -122,6 +122,9 @@ export default function ClientPage({ slug }: { slug: string }) {
 
       const data = await getWikiData(name);
       if (data) {
+        // Use the original search term as the title for tracking
+        // This ensures trending topics are tracked consistently
+        data.title = name;
         setWikiData(data);
       }
       setIsWikiLoading(false);
