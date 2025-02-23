@@ -1,8 +1,10 @@
 import { put, list } from "@vercel/blob";
 
 // Simple in-memory cache to store blob data for a short time
-type CacheEntry = { data: any; timestamp: number };
-const cache = new Map<string, CacheEntry>();
+type CacheEntry<T> = { data: T; timestamp: number };
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+const cache = new Map<string, CacheEntry<JsonValue>>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Namespace prefix for all blob keys
@@ -14,21 +16,21 @@ function withNamespace(path: string): string {
 }
 
 export interface StorageInterface {
-    get(path: string): Promise<any | null>;
-    put(path: string, data: any): Promise<void>;
+    get<T extends JsonValue>(path: string): Promise<T | null>;
+    put<T extends JsonValue>(path: string, data: T): Promise<void>;
     list(prefix?: string): Promise<string[]>;
     delete(path: string): Promise<void>;
 }
 
 class BlobStorage implements StorageInterface {
-    async get(path: string): Promise<any | null> {
+    async get<T extends JsonValue>(path: string): Promise<T | null> {
         const key = withNamespace(path);
 
         // Check cache first
         const entry = cache.get(key);
         if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
             console.log(`🔄 Cache hit for ${key}`);
-            return entry.data;
+            return entry.data as T;
         }
 
         console.log(`📥 Fetching blob: ${key}`);
@@ -46,14 +48,14 @@ class BlobStorage implements StorageInterface {
             cache.set(key, { data, timestamp: Date.now() });
             console.log(`💾 Cached blob: ${key}`);
 
-            return data;
+            return data as T;
         } catch (error) {
             console.error(`❌ Error fetching blob: ${key}`, error);
             return null;
         }
     }
 
-    async put(path: string, data: any): Promise<void> {
+    async put<T extends JsonValue>(path: string, data: T): Promise<void> {
         const key = withNamespace(path);
         console.log(`📤 Putting blob: ${key}`);
 
@@ -103,4 +105,4 @@ class BlobStorage implements StorageInterface {
 export const storage = new BlobStorage();
 
 // Export types for use elsewhere
-export type { StorageInterface, CacheEntry }; 
+export type { CacheEntry, JsonValue }; 

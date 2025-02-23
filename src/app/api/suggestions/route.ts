@@ -3,6 +3,15 @@ import { NextResponse } from "next/server";
 import { MAX_VISIBLE_SUGGESTIONS } from "@/app/constants";
 import { storage } from "@/lib/storage";
 
+type StatsData = {
+  title: string;
+  views: number;
+  labels?: string[];
+  lastVisited?: number;
+};
+
+type StatsMap = Record<string, StatsData>;
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("q")?.toLowerCase() || "";
@@ -13,20 +22,20 @@ export async function GET(request: Request) {
 
   try {
     // Fetch viewed items from stats
-    const stats = await storage.get("stats/views.json");
-    if (!stats?.data?.data) {
+    const stats = await storage.get("stats/views.json") as StatsMap;
+    if (!stats) {
       return NextResponse.json([]);
     }
 
-    // Convert stats to array and filter by query
-    const matches = Object.entries(stats.data.data)
-      .map(([slug, data]: [string, any]) => ({
+    // Filter and sort matches
+    const matches = Object.entries(stats)
+      .map(([slug, data]) => ({
         title: data.title,
         slug,
         count: data.views || 0,
       }))
       .filter(item =>
-        item.title.toLowerCase().includes(query) ||
+        item.title?.toLowerCase().includes(query) ||
         item.slug.includes(query)
       )
       .sort((a, b) => b.count - a.count)
