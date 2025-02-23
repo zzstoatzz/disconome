@@ -65,8 +65,9 @@ async function getWikiData(name: string) {
 
 const hasVisited = (slug: string) => {
   try {
+    const normalizedSlug = slug.toLowerCase();
     const visits = JSON.parse(localStorage.getItem("visits") || "{}");
-    return !!visits[slug];
+    return !!visits[normalizedSlug];
   } catch {
     return false;
   }
@@ -74,8 +75,9 @@ const hasVisited = (slug: string) => {
 
 const markVisited = (slug: string) => {
   try {
+    const normalizedSlug = slug.toLowerCase();
     const visits = JSON.parse(localStorage.getItem("visits") || "{}");
-    visits[slug] = Date.now();
+    visits[normalizedSlug] = Date.now();
     localStorage.setItem("visits", JSON.stringify(visits));
   } catch (e) {
     console.error("Failed to mark visit:", e);
@@ -135,13 +137,6 @@ export default function ClientPage({ slug }: { slug: string }) {
   // Track visit when Wikipedia data is loaded
   useEffect(() => {
     if (wikiData && !hasVisited(slug)) {
-      console.log("🚀 Visit tracking - Starting:", {
-        slug,
-        title: wikiData.title,
-        hasVisited: hasVisited(slug),
-        localStorage: localStorage.getItem("visits")
-      });
-
       fetch("/api/track-visit", {
         method: "POST",
         headers: {
@@ -153,37 +148,25 @@ export default function ClientPage({ slug }: { slug: string }) {
         }),
       })
         .then(async (response) => {
-          console.log("📡 Visit tracking - Response status:", response.status);
-
           if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
           }
           const data = await response.json();
-          console.log("✅ Visit tracking - Response data:", data);
 
           // Mark as visited if we get a successful response with views
           if (data.views) {
             markVisited(slug);
-            console.log("💾 Visit tracking - Local storage after marking:", localStorage.getItem("visits"));
-          } else {
-            console.warn("⚠️ Visit tracking - No views in response:", data);
           }
         })
         .catch((error) => {
           console.error("❌ Visit tracking - Failed:", error);
         });
-    } else {
-      console.log("⏭️ Visit tracking - Skipped:", {
-        hasWikiData: !!wikiData,
-        slug,
-        alreadyVisited: hasVisited(slug)
-      });
     }
   }, [slug, wikiData]);
 
-  // Debug logs
+  // Debug logs for timeline generation
   useEffect(() => {
-    console.log("📊 Current state:", {
+    console.log("📊 Timeline state:", {
       hasWikiData: !!wikiData,
       hasEvents: !!eventData,
       isLoading,

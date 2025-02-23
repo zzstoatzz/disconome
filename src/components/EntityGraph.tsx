@@ -590,35 +590,37 @@ const EntityGraph = () => {
           </div>
 
           {/* Popular Categories */}
-          <div className="p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transition-colors duration-200">
-            <div className="max-w-screen-lg mx-auto">
-              <div className="flex flex-col items-center">
-                <span className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
-                  popular categories
-                </span>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  {uniqueLabels.map((label) => (
-                    <div
-                      key={label}
-                      className="flex items-center space-x-2 cursor-pointer 
-                               hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
-                               px-3 py-1.5 rounded-full transition-colors"
-                      onMouseEnter={() => setHoveredLabel(label)}
-                      onMouseLeave={() => setHoveredLabel(null)}
-                    >
+          {uniqueLabels.length > 0 && (
+            <div className="p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transition-colors duration-200">
+              <div className="max-w-screen-lg mx-auto">
+                <div className="flex flex-col items-center">
+                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
+                    popular categories
+                  </span>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {uniqueLabels.map((label) => (
                       <div
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: categoryColors.get(label) }}
-                      />
-                      <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
-                        {label}
-                      </span>
-                    </div>
-                  ))}
+                        key={label}
+                        className="flex items-center space-x-2 cursor-pointer 
+                                 hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
+                                 px-3 py-1.5 rounded-full transition-colors"
+                        onMouseEnter={() => setHoveredLabel(label)}
+                        onMouseLeave={() => setHoveredLabel(null)}
+                      >
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: categoryColors.get(label) }}
+                        />
+                        <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
+                          {label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
