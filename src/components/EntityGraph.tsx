@@ -14,7 +14,11 @@ import {
   IGNORED_LABELS,
   IGNORED_PAGES
 } from "@/app/constants";
-import TrendingTopics from "./TrendingTopics";
+
+type Label = {
+  name: string;
+  source: 'trending' | 'ai';
+};
 
 type Node = {
   slug: string;
@@ -23,7 +27,7 @@ type Node = {
   size: number;
   count: number;
   title: string;
-  labels?: string[];
+  labels?: Label[];
   isClassified?: boolean;
   loggedMatch?: boolean;
 };
@@ -31,15 +35,15 @@ type Node = {
 type Edge = {
   source: Node;
   target: Node;
-  label: string;
-  labels: string[];
+  label: Label;
+  labels: Label[];
   strength: number; // Combined view count
 };
 
 const EntityGraph = () => {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
-  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
+  const [hoveredLabel, setHoveredLabel] = useState<Label | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -48,7 +52,7 @@ const EntityGraph = () => {
   const [time, setTime] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
   const [nodeVisibility, setNodeVisibility] = useState<boolean[]>([]);
-  const [trendingTopics, setTrendingTopics] = useState<string[]>([]);
+  const [trendingTopics, setTrendingTopics] = useState<Label[]>([]);
 
   // Add loading states
   const [nodesLoaded, setNodesLoaded] = useState(false);
@@ -56,9 +60,6 @@ const EntityGraph = () => {
 
   // Add a new theme state
   const [isDarkTheme, setIsDarkTheme] = useState(false);
-
-  // Add state for hovering trending topics
-  const [hoveredTrendingTopic, setHoveredTrendingTopic] = useState<string | null>(null);
 
   // Track when labels are loaded via classification
   useEffect(() => {
@@ -103,13 +104,13 @@ const EntityGraph = () => {
     // Use the same slug normalization for size calculation
     const nodeSlug = slug.toLowerCase().replace(/\s+/g, '-');
     const isTrending = trendingTopics.some(topic => {
-      const topicSlug = topic.toLowerCase().replace(/\s+/g, '-');
+      const topicSlug = topic.name.toLowerCase().replace(/\s+/g, '-');
       return nodeSlug === topicSlug;
     });
     return isTrending ? baseSize * 1.5 : baseSize;
   }, [trendingTopics]);
 
-  // Convert calculateEdges to useCallback and fix the nodes parameter issue
+  // Update calculateEdges to handle Labels
   const calculateEdges = useCallback(() => {
     const newEdges: Edge[] = [];
     const processedPairs = new Set<string>();
@@ -125,9 +126,9 @@ const EntityGraph = () => {
         if (processedPairs.has(pairKey)) return;
         processedPairs.add(pairKey);
 
-        const sharedLabels =
-          source.labels?.filter((label) => target.labels?.includes(label)) ||
-          [];
+        const sharedLabels = source.labels?.filter((label) =>
+          target.labels?.some(tl => tl.name === label.name)
+        ) || [];
 
         if (sharedLabels.length > 0) {
           const strength = (source.count + target.count) / 2;
@@ -135,10 +136,9 @@ const EntityGraph = () => {
             source,
             target,
             labels: sharedLabels,
-            label:
-              hoveredLabel && sharedLabels.includes(hoveredLabel)
-                ? hoveredLabel
-                : sharedLabels[0],
+            label: hoveredLabel && sharedLabels.some(l => l.name === hoveredLabel.name)
+              ? hoveredLabel
+              : sharedLabels[0],
             strength,
           });
         }
@@ -262,31 +262,59 @@ const EntityGraph = () => {
     return () => window.removeEventListener("resize", updateDimensions);
   }, []);
 
-  // Modify the uniqueLabels filtering to show more connections
+  // Modify the uniqueLabels filtering to include trending topics
   const uniqueLabels = useMemo(() => {
-    const labelCounts = new Map<string, { count: number; nodeCount: number }>();
+    const labelCounts = new Map<string, {
+      count: number;
+      nodeCount: number;
+      source: 'trending' | 'ai';
+    }>();
 
+    // First add trending topics
+    trendingTopics.forEach(topic => {
+      labelCounts.set(topic.name, {
+        count: 1,  // Give trending topics a base count
+        nodeCount: 1,  // And a base node count
+        source: 'trending'
+      });
+    });
+
+    // Then add node labels, preserving trending source if it exists
     nodes
       .filter(node => !IGNORED_PAGES.has(node.title as never))
       .forEach((node) => {
         (node.labels || [])
-          .filter(label => !IGNORED_LABELS.has(label))
+          .filter(label => !IGNORED_LABELS.has(label.name))
           .forEach((label) => {
-            const current = labelCounts.get(label) || { count: 0, nodeCount: 0 };
-            labelCounts.set(label, {
-              count: current.count + (node.count || 0),
-              nodeCount: current.nodeCount + 1,
-            });
+            const current = labelCounts.get(label.name);
+            if (current) {
+              // If the label already exists, preserve trending source if it was trending
+              labelCounts.set(label.name, {
+                count: current.count + (node.count || 0),
+                nodeCount: current.nodeCount + 1,
+                source: current.source === 'trending' ? 'trending' : label.source
+              });
+            } else {
+              // New label
+              labelCounts.set(label.name, {
+                count: node.count || 0,
+                nodeCount: 1,
+                source: label.source
+              });
+            }
           });
       });
 
-    // Only show labels that have 2+ visible nodes
+    // Only show labels that have nodes or are trending
     return Array.from(labelCounts.entries())
-      .filter(([, stats]) => stats.nodeCount >= 2) // Require 2+ nodes
+      .filter(([, stats]) => stats.source === 'trending' || stats.nodeCount >= 2)
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, MAX_VISIBLE_LABELS)
-      .map(([label]) => label);
-  }, [nodes]);
+      .map(([name, stats]) => ({
+        name,
+        source: stats.source
+      }));
+  }, [nodes, trendingTopics]);
 
   // Only log unique labels when they change and exist
   useEffect(() => {
@@ -325,54 +353,36 @@ const EntityGraph = () => {
     uniqueLabels.forEach((label, index) => {
       // Generate a pleasing HSL color
       const hue = (index * 137.508) % 360; // Golden angle approximation
-      colors.set(label, `hsl(${hue}, 70%, 65%)`);
+      colors.set(label.name, `hsl(${hue}, 70%, 65%)`);
     });
 
     return colors;
   }, [uniqueLabels]);
 
-  // Update node color to properly highlight trending and hovered nodes
+  // Update node color calculation
   const getNodeColor = useCallback((node: Node, index: number) => {
-    const validLabels = node.labels?.filter(label => !IGNORED_LABELS.has(label)) || [];
-    const nodeSlug = node.title.toLowerCase().replace(/\s+/g, '-');
-    const isTrending = trendingTopics.some(topic => {
-      const topicSlug = topic.toLowerCase().replace(/\s+/g, '-');
-      return nodeSlug === topicSlug;
-    });
-    const isHoveredTrending = hoveredTrendingTopic &&
-      nodeSlug === hoveredTrendingTopic.toLowerCase().replace(/\s+/g, '-');
+    const validLabels = node.labels?.filter(label => !IGNORED_LABELS.has(label.name)) || [];
 
-    // Trending topic hover takes precedence
-    if (isHoveredTrending) {
-      return isDarkTheme ? "rgba(14, 165, 233, 1)" : "rgba(14, 165, 233, 1)"; // Full opacity sky-500
-    }
-
-    // Active trending topic
-    if (isTrending) {
-      return isDarkTheme ? "rgba(14, 165, 233, 0.8)" : "rgba(14, 165, 233, 0.8)"; // sky-500
-    }
-
-    // Rest of the color logic...
     if (hoveredLabel && validLabels.length > 0) {
-      return validLabels.includes(hoveredLabel)
-        ? categoryColors.get(hoveredLabel) || `hsla(${index * 55}, 70%, 65%, 0.9)`
-        : isDarkTheme ? "hsla(0, 0%, 75%, 0.1)" : "hsla(0, 0%, 25%, 0.1)"; // More contrast for non-matching
+      return validLabels.some(l => l.name === hoveredLabel.name)
+        ? categoryColors.get(hoveredLabel.name) || `hsla(${index * 55}, 70%, 65%, 0.9)`
+        : isDarkTheme ? "hsla(0, 0%, 75%, 0.1)" : "hsla(0, 0%, 25%, 0.1)";
     }
 
     if (!validLabels.length) {
       return "hsla(0, 0%, 75%, 0.4)";
     }
 
-    return categoryColors.get(validLabels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`;
-  }, [hoveredLabel, categoryColors, isDarkTheme, trendingTopics, hoveredTrendingTopic]);
+    return categoryColors.get(validLabels[0].name) || `hsla(${index * 55}, 70%, 65%, 0.7)`;
+  }, [hoveredLabel, categoryColors, isDarkTheme]);
 
-  // Enhance edge styling for category-colored electricity
+  // Update getEdgeStyle to handle Labels
   const getEdgeStyle = (edge: Edge) => {
-    const isHighlighted = hoveredLabel && edge.labels.includes(hoveredLabel);
+    const isHighlighted = hoveredLabel && edge.labels.some(l => l.name === hoveredLabel.name);
 
     if (isHighlighted) {
       const categoryColor =
-        categoryColors.get(hoveredLabel!) || "hsl(210, 100%, 75%)";
+        categoryColors.get(hoveredLabel!.name) || "hsl(210, 100%, 75%)";
       const hue = parseInt(categoryColor.match(/hsl\((\d+)/)?.[1] || "210");
 
       const dashLength = 1.5 + Math.sin(time * 0.1) * 0.5;
@@ -493,6 +503,48 @@ const EntityGraph = () => {
     };
   }, []);
 
+  // Add handler for trending topics changes
+  const handleTrendingTopicsChange = useCallback((topics: Label[]) => {
+    setTrendingTopics(topics);
+    // Update nodes with trending labels
+    setNodes(prevNodes => prevNodes.map(node => {
+      const nodeSlug = node.title.toLowerCase().replace(/\s+/g, '-');
+      const matchingTopic = topics.find(topic =>
+        topic.name.toLowerCase().replace(/\s+/g, '-') === nodeSlug
+      );
+      if (matchingTopic) {
+        // Remove any existing label with the same name but different source
+        const existingLabels = (node.labels || []).filter(l => l.name !== matchingTopic.name);
+        return {
+          ...node,
+          labels: [...existingLabels, { ...matchingTopic, source: 'trending' }]
+        };
+      }
+      return node;
+    }));
+  }, []);
+
+  // Add trending topics fetching
+  useEffect(() => {
+    const fetchTrendingTopics = async () => {
+      try {
+        const response = await fetch('/api/trending');
+        const data = await response.json();
+        const topics = data.labels.map((label: Label) => ({
+          ...label,
+          source: 'trending' as const
+        }));
+        handleTrendingTopicsChange(topics);
+      } catch (error) {
+        console.error('Error fetching trending topics:', error);
+      }
+    };
+
+    fetchTrendingTopics();
+    const interval = setInterval(fetchTrendingTopics, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [handleTrendingTopicsChange]);
+
   return (
     <div ref={containerRef} className="fixed inset-0 z-0">
       <svg ref={svgRef} width="100%" height="100%" className="z-10 pt-16">
@@ -515,10 +567,8 @@ const EntityGraph = () => {
           const nodeKey = `node-${node.slug}-${i}`;
           const nodeSlug = node.title.toLowerCase().replace(/\s+/g, '-');
           const isTrending = trendingTopics.some(topic =>
-            topic.toLowerCase().replace(/\s+/g, '-') === nodeSlug
+            topic.name.toLowerCase().replace(/\s+/g, '-') === nodeSlug
           );
-          const isHoveredTrending = hoveredTrendingTopic &&
-            nodeSlug === hoveredTrendingTopic.toLowerCase().replace(/\s+/g, '-');
 
           return (
             <g
@@ -532,17 +582,17 @@ const EntityGraph = () => {
                 r={node.size}
                 fill={getNodeColor(node, i)}
                 stroke={
-                  isHoveredTrending || isTrending
-                    ? "rgba(14, 165, 233, 0.5)"
+                  isTrending
+                    ? "rgba(14, 165, 233, 0.8)"
                     : isDarkTheme
                       ? "rgba(255, 255, 255, 0.3)"
                       : "rgba(0, 0, 0, 0.3)"
                 }
-                strokeWidth={isHoveredTrending ? 1.5 : isTrending ? 0.75 : 0.25}
+                strokeWidth={isTrending ? 0.75 : 0.25}
                 className={`transition-all duration-300 hover:opacity-90`}
                 filter={isTrending ? "url(#trending-glow)" : undefined}
                 style={isTrending ? {
-                  animation: isHoveredTrending ? 'none' : 'pulse 3s ease-in-out infinite'
+                  animation: 'pulse 3s ease-in-out infinite'
                 } : undefined}
               />
               <text
@@ -550,7 +600,7 @@ const EntityGraph = () => {
                 textAnchor="middle"
                 className={`text-xs transition-opacity duration-300 pointer-events-none 
                   ${isDarkTheme ? "fill-white" : "fill-gray-800"} 
-                  ${(hoveredLabel && node.labels?.includes(hoveredLabel)) || isHoveredTrending
+                  ${(hoveredLabel && node.labels?.some(l => l.name === hoveredLabel.name)) || isTrending
                     ? "opacity-100"
                     : "opacity-0 group-hover:opacity-100"
                   }`}
@@ -558,8 +608,8 @@ const EntityGraph = () => {
                 {node.title}
               </text>
               {isTrending && (
-                <g transform={`translate(${-node.size * 0.6}, ${-node.size * 5})`}
-                  className={`transition-all duration-300 ${isHoveredTrending || hoveredTrendingTopic === node.title ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                <g transform={`translate(${-node.size * 0.6}, ${-node.size * 3})`}
+                  className={`transition-all duration-300 ${hoveredLabel && node.labels?.some(l => l.name === hoveredLabel.name) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                 >
                   <image
                     href="/bsky-logo.png"
@@ -578,45 +628,59 @@ const EntityGraph = () => {
         })}
       </svg>
 
-      {/* Move TrendingTopics to top */}
+      {/* Single unified labels section */}
       <div className="fixed top-0 left-0 right-0 z-20">
         <div className="flex flex-col">
-          {/* Trending Topics */}
-          <div className="flex justify-center px-4 py-2">
-            <TrendingTopics
-              onTrendingTopicsChange={setTrendingTopics}
-              onTopicHover={setHoveredTrendingTopic}
-            />
-          </div>
-
-          {/* Popular Categories */}
           {uniqueLabels.length > 0 && (
             <div className="p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transition-colors duration-200">
               <div className="max-w-screen-lg mx-auto">
-                <div className="flex flex-col items-center">
-                  <span className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">
-                    popular categories
-                  </span>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    {uniqueLabels.map((label) => (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {uniqueLabels.map((label) => {
+                    const labelKey = `label-${label.name}-${label.source}`;
+                    return (
                       <div
-                        key={label}
-                        className="flex items-center space-x-2 cursor-pointer 
+                        key={labelKey}
+                        className="group/label relative flex items-center space-x-2 cursor-pointer 
                                  hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
                                  px-3 py-1.5 rounded-full transition-colors"
                         onMouseEnter={() => setHoveredLabel(label)}
                         onMouseLeave={() => setHoveredLabel(null)}
                       >
-                        <div
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: categoryColors.get(label) }}
-                        />
+                        {label.source === 'trending' ? (
+                          <svg
+                            className="w-3 h-3 text-sky-500"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M23 6l-9.5 9.5-5-5L1 18" />
+                            <path d="M17 6h6v6" />
+                          </svg>
+                        ) : (
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: categoryColors.get(label.name) }}
+                          />
+                        )}
                         <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
-                          {label}
+                          {label.name}
                         </span>
+
+                        {/* Tooltip */}
+                        <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 
+                                    opacity-0 group-hover/label:opacity-100 transition-opacity
+                                    text-[10px] whitespace-nowrap bg-gray-800/95 dark:bg-gray-700/95 
+                                    text-white/90 px-2 py-1 rounded pointer-events-none">
+                          {label.source === 'trending'
+                            ? "Trending topic on Bluesky"
+                            : "AI-identified common theme"}
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

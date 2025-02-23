@@ -2,15 +2,15 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 
-type Topic = {
-    topic: string;
-    link: string;
-    score?: number;
+type Label = {
+    name: string;
+    source: 'trending' | 'ai';
+    timestamp?: number;
 };
 
 interface TrendingTopicsProps {
-    onTrendingTopicsChange?: (topics: string[]) => void;
-    onTopicHover?: (topic: string | null) => void;
+    onTrendingTopicsChange?: (topics: Label[]) => void;
+    onTopicHover?: (topic: Label | null) => void;
 }
 
 const TrendingIcon = ({ className }: { className?: string }) => (
@@ -29,9 +29,9 @@ const TrendingIcon = ({ className }: { className?: string }) => (
 );
 
 export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }: TrendingTopicsProps) {
-    const [topics, setTopics] = useState<Topic[]>([]);
+    const [topics, setTopics] = useState<Label[]>([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [hoveredTopic, setHoveredTopic] = useState<string | null>(null);
+    const [hoveredTopic, setHoveredTopic] = useState<Label | null>(null);
     const router = useRouter();
 
     useEffect(() => {
@@ -39,14 +39,16 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
             try {
                 const response = await fetch('/api/trending');
                 const data = await response.json();
-                // Take first 6 topics (they come pre-sorted from Bluesky)
-                const limitedTopics = data.slice(0, 6);
+                // Take first 6 labels (they come pre-sorted from Bluesky)
+                const limitedTopics = data.labels.slice(0, 6).map((label: Label) => ({
+                    ...label,
+                    source: 'trending' as const
+                }));
                 setTopics(limitedTopics);
 
                 if (onTrendingTopicsChange) {
-                    const topicNames = limitedTopics.map((t: Topic) => t.topic);
-                    console.log('Loaded trending topics:', topicNames.length);
-                    onTrendingTopicsChange(topicNames);
+                    console.log('Loaded trending topics:', limitedTopics.length);
+                    onTrendingTopicsChange(limitedTopics);
                 }
             } catch (error) {
                 console.error('Error fetching trending topics:', error);
@@ -60,12 +62,12 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
         return () => clearInterval(interval);
     }, [onTrendingTopicsChange]);
 
-    const handleTopicClick = (topic: string) => {
-        const slug = topic.toLowerCase().replace(/\s+/g, '-');
+    const handleTopicClick = (topic: Label) => {
+        const slug = topic.name.toLowerCase().replace(/\s+/g, '-');
         router.push(`/wiki/${slug}`);
     };
 
-    const handleTopicHover = (topic: string | null) => {
+    const handleTopicHover = (topic: Label | null) => {
         setHoveredTopic(topic);
         if (onTopicHover) {
             onTopicHover(topic);
@@ -99,13 +101,13 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
 
             <div className="flex items-center justify-center gap-1.5 flex-wrap">
                 {topics.map((topic) => {
-                    const key = `topic-${topic.topic.toLowerCase().replace(/\s+/g, '-')}`;
-                    const isHovered = hoveredTopic === topic.topic;
+                    const key = `topic-${topic.name.toLowerCase().replace(/\s+/g, '-')}`;
+                    const isHovered = hoveredTopic?.name === topic.name;
                     return (
                         <button
                             key={key}
-                            onClick={() => handleTopicClick(topic.topic)}
-                            onMouseEnter={() => handleTopicHover(topic.topic)}
+                            onClick={() => handleTopicClick(topic)}
+                            onMouseEnter={() => handleTopicHover(topic)}
                             onMouseLeave={() => handleTopicHover(null)}
                             className={`
                                 flex-shrink-0 flex items-center px-2 py-1 rounded-lg whitespace-nowrap
@@ -125,7 +127,7 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
                                 w-3 h-3 mr-2 transition-all duration-300
                                 ${isHovered ? 'text-sky-500 scale-110' : 'text-sky-400/50 group-hover:text-sky-400'}
                             `} />
-                            <span className="text-sm">{topic.topic}</span>
+                            <span className="text-sm">{topic.name}</span>
                         </button>
                     );
                 })}

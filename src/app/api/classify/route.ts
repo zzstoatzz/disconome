@@ -99,6 +99,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ labels: cached.labels });
     }
 
+    // Get trending topics as potential labels
+    const trendingResponse = await fetch(new URL("/api/trending", req.url));
+    const trendingData = await trendingResponse.json();
+    const trendingLabels = (trendingData.labels || []).map((l: { name: string }) => ({
+      name: l.name,
+      source: 'trending'
+    }));
+
     // Check for existing classification first
     const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
     const { blobs: classificationBlobs } = await list({
@@ -108,13 +116,11 @@ export async function POST(req: Request) {
       const existingClassification = await (
         await fetch(classificationBlobs[0].url)
       ).json();
-      // Ensure labels is always an array
-      existingClassification.labels = Array.isArray(
-        existingClassification.labels,
-      )
-        ? existingClassification.labels
+      // Ensure labels is always an array and include source
+      const existingLabels = Array.isArray(existingClassification.labels)
+        ? existingClassification.labels.map((l: string) => ({ name: l, source: 'ai' }))
         : [];
-      return NextResponse.json(existingClassification);
+      return NextResponse.json({ labels: existingLabels });
     }
 
     // Get current stats to find top viewed nodes
@@ -137,23 +143,50 @@ export async function POST(req: Request) {
         labels: data.labels || [],
       }));
 
-    // Generate classification considering top nodes
+    // Generate classification considering top nodes and trending topics
     const result = await generateObject({
       model: openai("gpt-4o"),
       schema: ClassificationSchema,
-      prompt: `${prompt || `Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities:`}
+      prompt: `${prompt || `Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities and trending topics:`}
 
             Top viewed entities and their current labels:
             ${topNodes.map((n) => `- ${n.title}: ${n.labels.join(", ")}`).join("\n")}
 
-            Focus on finding or creating categories that could meaningfully connect multiple entities.`,
+            Current trending topics that could be relevant labels:
+            ${trendingLabels.map((l: { name: string }) => l.name).join(", ")}
+
+            Focus on finding or creating categories that could meaningfully connect multiple entities.
+            If the content is clearly related to any of the trending topics, include those as labels.`,
     });
+
+    // Transform AI-generated labels to include source
+    const aiLabels = result.object.labels.map(label => ({
+      name: label,
+      source: 'ai'
+    }));
+
+    // Combine AI-generated labels with any matching trending topics
+    const finalLabels = [...new Set([
+      ...aiLabels,
+      ...trendingLabels.filter((tl: { name: string }) =>
+        title.toLowerCase().includes(tl.name.toLowerCase()) ||
+        aiLabels.some(al =>
+          al.name.toLowerCase().includes(tl.name.toLowerCase()) ||
+          tl.name.toLowerCase().includes(al.name.toLowerCase())
+        )
+      )
+    ])];
+
+    const finalResult = {
+      ...result.object,
+      labels: finalLabels
+    };
 
     // Store classification
     await put(
       classificationPath,
       JSON.stringify({
-        ...result.object,
+        ...finalResult,
         timestamp: Date.now(),
         title,
       }),
@@ -165,14 +198,13 @@ export async function POST(req: Request) {
 
     // Cache the result
     classifications.set(slug, {
-      labels: Array.isArray(result.object.labels) ? result.object.labels : [],
+      labels: finalLabels,
       timestamp: Date.now(),
     });
 
-    return NextResponse.json(result.object);
+    return NextResponse.json(finalResult);
   } catch (error) {
     console.error("Error classifying entity:", error);
-    // Return empty labels array on error instead of error response
     return NextResponse.json({ labels: [] });
   }
 }
