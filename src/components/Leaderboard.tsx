@@ -17,7 +17,7 @@ export function Leaderboard() {
     : [];
 
   return (
-    <div className="mt-8 sm:mt-12 relative z-10 px-4 sm:px-0 max-w-sm mx-auto">
+    <div className="mt-8 sm:mt-12 relative z-10 px-4 sm:px-0 max-w-sm mx-auto overflow-visible">
       <h2 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4 text-gray-800 dark:text-gray-100 text-center">
         most viewed entities
       </h2>
@@ -26,7 +26,7 @@ export function Leaderboard() {
           Loading trending entities...
         </div>
       ) : sortedEntries.length > 0 ? (
-        <div className="space-y-2">
+        <div className="space-y-2 overflow-visible">
           {sortedEntries.map(([slug, entry], index) => (
             <Link
               key={slug}

@@ -579,36 +579,41 @@ const EntityGraph = () => {
         })}
       </svg>
 
-      {/* Left sidebar for trending topics */}
-      <div className="fixed left-0 top-16 bottom-0 z-20">
-        <TrendingTopics
-          onTrendingTopicsChange={setTrendingTopics}
-          onTopicHover={setHoveredTrendingTopic}
-        />
-      </div>
+      {/* Move TrendingTopics to top */}
+      <div className="fixed top-0 left-0 right-0 z-20">
+        <div className="flex flex-col">
+          {/* Trending Topics */}
+          <div className="flex justify-center px-4 py-2">
+            <TrendingTopics
+              onTrendingTopicsChange={setTrendingTopics}
+              onTopicHover={setHoveredTrendingTopic}
+            />
+          </div>
 
-      {/* Top bar for category labels */}
-      <div className="fixed top-0 left-0 right-0 p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm z-20 transition-colors duration-200">
-        <div className="max-w-screen-lg mx-auto">
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {uniqueLabels.map((label) => (
-              <div
-                key={label}
-                className="flex items-center space-x-2 cursor-pointer 
-                         hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
-                         px-3 py-1.5 rounded-full transition-colors"
-                onMouseEnter={() => setHoveredLabel(label)}
-                onMouseLeave={() => setHoveredLabel(null)}
-              >
-                <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: categoryColors.get(label) }}
-                />
-                <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
-                  {label}
-                </span>
+          {/* Category labels */}
+          <div className="p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transition-colors duration-200">
+            <div className="max-w-screen-lg mx-auto">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {uniqueLabels.map((label) => (
+                  <div
+                    key={label}
+                    className="flex items-center space-x-2 cursor-pointer 
+                             hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
+                             px-3 py-1.5 rounded-full transition-colors"
+                    onMouseEnter={() => setHoveredLabel(label)}
+                    onMouseLeave={() => setHoveredLabel(null)}
+                  >
+                    <div
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: categoryColors.get(label) }}
+                    />
+                    <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
+                      {label}
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         </div>
       </div>
