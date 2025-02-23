@@ -5,6 +5,7 @@ import Image from 'next/image';
 type Topic = {
     topic: string;
     link: string;
+    score?: number;
 };
 
 interface TrendingTopicsProps {
@@ -39,12 +40,12 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
             try {
                 const response = await fetch('/api/trending');
                 const data = await response.json();
-                setTopics(data);
+                // Take first 6 topics (they come pre-sorted from Bluesky)
+                const limitedTopics = data.slice(0, 6);
+                setTopics(limitedTopics);
 
-                // Notify parent of trending topics with consistent slug formatting
                 if (onTrendingTopicsChange) {
-                    const topicNames = data.map((t: Topic) => t.topic);
-                    // Only log once when topics are initially loaded
+                    const topicNames = limitedTopics.map((t: Topic) => t.topic);
                     console.log('Loaded trending topics:', topicNames.length);
                     onTrendingTopicsChange(topicNames);
                 }
@@ -83,12 +84,12 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
     }
 
     return (
-        <div className={`transition-all duration-300 ease-in-out ${isExpanded ? 'w-48' : 'w-12'}`}>
+        <div className={`relative transition-all duration-300 ease-in-out ${isExpanded ? 'w-full max-w-screen-lg' : 'w-[140px]'}`}>
             <button
                 onClick={() => setIsExpanded(!isExpanded)}
                 className={`flex items-center gap-2 px-3 py-2 text-sky-600 dark:text-sky-400
                          hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-lg transition-colors
-                         ${isExpanded ? 'w-48' : 'w-auto'}`}
+                         ${isExpanded ? 'w-[140px] mx-auto' : 'w-full'}`}
                 title={isExpanded ? "Collapse trending topics" : "Show trending topics"}
             >
                 <span className="whitespace-nowrap text-sm font-medium">Trending on</span>
@@ -102,41 +103,49 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
             </button>
 
             <div className={`
-                overflow-hidden transition-all duration-300 ease-in-out
-                ${isExpanded ? 'opacity-100 max-h-[calc(100vh-6rem)]' : 'opacity-0 max-h-0'}
+                absolute top-0 left-1/2 -translate-x-1/2 w-full
+                transition-all duration-300 ease-in-out
+                bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm rounded-lg shadow-lg
+                ${isExpanded ? 'opacity-100 h-11' : 'opacity-0 h-0'}
+                overflow-hidden
             `}>
-                <div className="mt-2 space-y-1.5">
-                    {topics.map((topic) => {
-                        const key = `topic-${topic.topic.toLowerCase().replace(/\s+/g, '-')}`;
-                        const isHovered = hoveredTopic === topic.topic;
-                        return (
-                            <button
-                                key={key}
-                                onClick={() => handleTopicClick(topic.topic)}
-                                onMouseEnter={() => handleTopicHover(topic.topic)}
-                                onMouseLeave={() => handleTopicHover(null)}
-                                className={`
-                                    flex items-center w-full px-3 py-2 rounded-lg
-                                    ${isHovered
-                                        ? 'bg-sky-100 dark:bg-sky-900/50 shadow-[0_0_15px_rgba(14,165,233,0.4)]'
-                                        : 'hover:bg-sky-50 dark:hover:bg-sky-900/30'}
-                                    text-sky-600 dark:text-sky-300
-                                    transition-all duration-300
-                                    group
-                                `}
-                                style={{
-                                    animation: isHovered ? 'none' : undefined,
-                                    transform: isHovered ? 'scale(1.02)' : 'scale(1)'
-                                }}
-                            >
-                                <TrendingIcon className={`
-                                    w-3 h-3 mr-2 transition-all duration-300
-                                    ${isHovered ? 'text-sky-500 scale-110' : 'text-sky-400/50 group-hover:text-sky-400'}
-                                `} />
-                                <span className="truncate text-sm">{topic.topic}</span>
-                            </button>
-                        );
-                    })}
+                <div className="absolute left-0 top-0 bottom-0 w-8 z-10 bg-gradient-to-r from-white/95 dark:from-gray-900/95 to-transparent pointer-events-none" />
+                <div className="absolute right-0 top-0 bottom-0 w-8 z-10 bg-gradient-to-l from-white/95 dark:from-gray-900/95 to-transparent pointer-events-none" />
+
+                <div className="h-full overflow-x-auto flex items-center justify-center px-8 no-scrollbar">
+                    <div className="flex items-center gap-1.5 mx-auto">
+                        {topics.map((topic) => {
+                            const key = `topic-${topic.topic.toLowerCase().replace(/\s+/g, '-')}`;
+                            const isHovered = hoveredTopic === topic.topic;
+                            return (
+                                <button
+                                    key={key}
+                                    onClick={() => handleTopicClick(topic.topic)}
+                                    onMouseEnter={() => handleTopicHover(topic.topic)}
+                                    onMouseLeave={() => handleTopicHover(null)}
+                                    className={`
+                                        flex-shrink-0 flex items-center px-2 py-1 rounded-lg whitespace-nowrap
+                                        ${isHovered
+                                            ? 'bg-sky-100 dark:bg-sky-900/50 shadow-[0_0_15px_rgba(14,165,233,0.4)]'
+                                            : 'hover:bg-sky-50 dark:hover:bg-sky-900/30'}
+                                        text-sky-600 dark:text-sky-300
+                                        transition-all duration-300
+                                        group
+                                    `}
+                                    style={{
+                                        animation: isHovered ? 'none' : undefined,
+                                        transform: isHovered ? 'scale(1.02)' : 'scale(1)'
+                                    }}
+                                >
+                                    <TrendingIcon className={`
+                                        w-3 h-3 mr-2 transition-all duration-300
+                                        ${isHovered ? 'text-sky-500 scale-110' : 'text-sky-400/50 group-hover:text-sky-400'}
+                                    `} />
+                                    <span className="text-sm">{topic.topic}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
             </div>
         </div>

@@ -59,7 +59,7 @@ function HomeContent() {
   };
 
   return (
-    <main className="min-h-screen p-4 relative grid place-items-center">
+    <main className="h-full relative grid place-items-center">
       <div className="fixed inset-0 transition-colors duration-500">
         <ErrorBoundary>
           <EntityGraph />
@@ -124,7 +124,7 @@ function HomeContent() {
         className={`relative z-10 w-full max-w-md transition-opacity duration-300 ${isContentVisible ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
       >
-        <h1 className="text-5xl font-bold mb-12 text-gray-800 dark:text-gray-100 text-center">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-6 sm:mb-8 md:mb-12 text-gray-800 dark:text-gray-100 text-center">
           discono.me
         </h1>
         <div className="w-full relative backdrop-blur-sm bg-white/90 dark:bg-gray-800/90 p-4 rounded-lg sm:bg-transparent sm:dark:bg-transparent sm:backdrop-blur-none sm:p-0">
@@ -175,7 +175,7 @@ function HomeContent() {
 // Main component with Suspense boundary
 export default function Home() {
   return (
-    <Suspense fallback={<div className="min-h-screen grid place-items-center">
+    <Suspense fallback={<div className="h-full grid place-items-center">
       <LoadingSpinner />
     </div>}>
       <HomeContent />

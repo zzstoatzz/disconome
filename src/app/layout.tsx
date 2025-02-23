@@ -57,7 +57,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${firaCode.variable} font-mono antialiased bg-gray-50 dark:bg-gray-900 h-full flex flex-col`}
+        className={`${firaCode.variable} font-mono antialiased bg-gray-50 dark:bg-gray-900 h-screen overflow-hidden flex flex-col`}
       >
         <MouseTrail />
         <a
@@ -69,7 +69,7 @@ export default function RootLayout({
         <ThemeToggle />
         <main
           id="main-content"
-          className="flex-1 overflow-auto"
+          className="flex-1 relative"
           role="main"
           aria-label="Main content"
         >
