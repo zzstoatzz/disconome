@@ -34,6 +34,16 @@ export default function Footer() {
           >
             Wikipedia
           </Link>
+          {" "}
+          and{" "}
+          <Link
+            href="https://docs.bsky.app/docs/get-started"
+            className="text-blue-600 hover:text-blue-800 transition-colors"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Bluesky API
+          </Link>
         </p>
       </div>
     </footer>
