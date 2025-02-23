@@ -1,20 +1,44 @@
 import Link from "next/link";
-import { useData } from "@/hooks/useData";
-import { StatsMap } from "@/types";
-import { STATS_PATH } from "@/app/constants";
+import { useState, useEffect } from "react";
+
+type Entity = {
+  slug: string;
+  title: string;
+  count: number;
+  labels: string[];
+};
 
 export function Leaderboard() {
-  const { data: stats, error } = useData<StatsMap>(STATS_PATH, {
-    refreshInterval: 30000 // Refresh every 30 seconds
-  });
+  const [stats, setStats] = useState<Entity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-  const isLoading = !stats && !error;
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const response = await fetch('/api/track-visit');
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        console.log("📊 Leaderboard - Received stats:", data);
+        setStats(data);
+      } catch (err) {
+        console.error("❌ Leaderboard - Error:", err);
+        setError(err as Error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const sortedEntries = stats
-    ? Object.entries(stats)
-      .sort(([, a], [, b]) => (b.views || 0) - (a.views || 0))
-      .slice(0, 3)
-    : [];
+    fetchStats();
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Stats are already sorted by count from the API
+  const topEntries = stats.slice(0, 3);
 
   return (
     <div className="mt-8 sm:mt-12 relative z-10 px-4 sm:px-0 max-w-sm mx-auto overflow-visible">
@@ -25,12 +49,16 @@ export function Leaderboard() {
         <div className="text-sm sm:text-base text-gray-600 text-center">
           Loading trending entities...
         </div>
-      ) : sortedEntries.length > 0 ? (
+      ) : error ? (
+        <div className="text-sm sm:text-base text-red-600 text-center">
+          Error loading trending entities
+        </div>
+      ) : topEntries.length > 0 ? (
         <div className="space-y-2 overflow-visible">
-          {sortedEntries.map(([slug, entry], index) => (
+          {topEntries.map((entry, index) => (
             <Link
-              key={slug}
-              href={`/wiki/${slug}`}
+              key={entry.slug}
+              href={`/wiki/${entry.slug}`}
               className="flex items-center p-2 sm:p-3 bg-white/90 dark:bg-gray-800/90 
                        rounded-lg shadow-sm 
                        hover:shadow-md hover:translate-x-0.5
@@ -49,7 +77,7 @@ export function Leaderboard() {
                   {entry.title}
                 </h3>
                 <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
-                  {entry.views} views
+                  {entry.count} views
                 </p>
               </div>
             </Link>

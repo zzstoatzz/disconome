@@ -132,7 +132,13 @@ export default function ClientPage({ slug }: { slug: string }) {
   // Track visit when Wikipedia data is loaded
   useEffect(() => {
     if (wikiData && !hasVisited(slug)) {
-      console.log("🚀 Attempting to track visit for:", slug);
+      console.log("🚀 Visit tracking - Starting:", {
+        slug,
+        title: wikiData.title,
+        hasVisited: hasVisited(slug),
+        localStorage: localStorage.getItem("visits")
+      });
+
       fetch("/api/track-visit", {
         method: "POST",
         headers: {
@@ -144,15 +150,31 @@ export default function ClientPage({ slug }: { slug: string }) {
         }),
       })
         .then(async (response) => {
+          console.log("📡 Visit tracking - Response status:", response.status);
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
           const data = await response.json();
-          console.log("✅ Track visit response:", data);
-          if (data.success) {
+          console.log("✅ Visit tracking - Response data:", data);
+
+          // Mark as visited if we get a successful response with views
+          if (data.views) {
             markVisited(slug);
+            console.log("💾 Visit tracking - Local storage after marking:", localStorage.getItem("visits"));
+          } else {
+            console.warn("⚠️ Visit tracking - No views in response:", data);
           }
         })
         .catch((error) => {
-          console.error("❌ Failed to track visit:", error);
+          console.error("❌ Visit tracking - Failed:", error);
         });
+    } else {
+      console.log("⏭️ Visit tracking - Skipped:", {
+        hasWikiData: !!wikiData,
+        slug,
+        alreadyVisited: hasVisited(slug)
+      });
     }
   }, [slug, wikiData]);
 
