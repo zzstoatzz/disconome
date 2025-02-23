@@ -14,6 +14,8 @@ import {
   IGNORED_LABELS,
   IGNORED_PAGES
 } from "@/app/constants";
+import TrendingTopics from "./TrendingTopics";
+
 type Node = {
   slug: string;
   x: number;
@@ -23,6 +25,7 @@ type Node = {
   title: string;
   labels?: string[];
   isClassified?: boolean;
+  loggedMatch?: boolean;
 };
 
 type Edge = {
@@ -45,6 +48,7 @@ const EntityGraph = () => {
   const [time, setTime] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
   const [nodeVisibility, setNodeVisibility] = useState<boolean[]>([]);
+  const [trendingTopics, setTrendingTopics] = useState<string[]>([]);
 
   // Add loading states
   const [nodesLoaded, setNodesLoaded] = useState(false);
@@ -52,6 +56,9 @@ const EntityGraph = () => {
 
   // Add a new theme state
   const [isDarkTheme, setIsDarkTheme] = useState(false);
+
+  // Add state for hovering trending topics
+  const [hoveredTrendingTopic, setHoveredTrendingTopic] = useState<string | null>(null);
 
   // Track when labels are loaded via classification
   useEffect(() => {
@@ -89,10 +96,18 @@ const EntityGraph = () => {
     return () => observer.disconnect();
   }, []);
 
-  const calculateNodeSize = (count: number, data: { count: number }[]) => {
+  // Update node size calculation to account for trending status
+  const calculateNodeSize = useCallback((count: number, data: { count: number }[], slug: string) => {
     const maxCount = Math.max(...data.map((d) => d.count));
-    return 6 + (count / maxCount) * 12; // Reduced from 8 + ... * 16
-  };
+    const baseSize = 6 + (count / maxCount) * 12;
+    // Use the same slug normalization for size calculation
+    const nodeSlug = slug.toLowerCase().replace(/\s+/g, '-');
+    const isTrending = trendingTopics.some(topic => {
+      const topicSlug = topic.toLowerCase().replace(/\s+/g, '-');
+      return nodeSlug === topicSlug;
+    });
+    return isTrending ? baseSize * 1.5 : baseSize;
+  }, [trendingTopics]);
 
   // Convert calculateEdges to useCallback and fix the nodes parameter issue
   const calculateEdges = useCallback(() => {
@@ -140,7 +155,7 @@ const EntityGraph = () => {
     }
   }, [nodes, calculateEdges]);
 
-  // Center calculation helper
+  // Center calculation helper - simplified
   const getCenter = useCallback(() => {
     const rect = containerRef.current?.getBoundingClientRect();
     return {
@@ -164,6 +179,7 @@ const EntityGraph = () => {
     }));
   };
 
+  // Update the data fetching effect to use the new calculateNodeSize
   useEffect(() => {
     if (dataFetchedRef.current) return;
     dataFetchedRef.current = true;
@@ -174,20 +190,22 @@ const EntityGraph = () => {
         const center = getCenter();
         const radius = Math.min(center.x, center.y) * 0.7;
 
-        // Sort and slice before distribution
-        const topNodes = data
-          .sort(
-            (a: { count: number }, b: { count: number }) => b.count - a.count,
-          )
-          .slice(0, MAX_VISIBLE_NODES)
-          .map((entity: Node) => ({
-            ...entity,
-            size: calculateNodeSize(
-              entity.count,
-              data.slice(0, MAX_VISIBLE_NODES),
-            ),
-            labels: entity.labels || [], // Keep existing labels if any
-          }));
+        // Deduplicate nodes by slug
+        const uniqueNodes = new Map();
+        data.forEach((entity: Node) => {
+          if (!uniqueNodes.has(entity.slug)) {
+            uniqueNodes.set(entity.slug, {
+              ...entity,
+              size: calculateNodeSize(entity.count, data, entity.slug),
+              labels: entity.labels || [],
+            });
+          }
+        });
+
+        // Convert back to array and distribute
+        const topNodes = Array.from(uniqueNodes.values())
+          .sort((a, b) => b.count - a.count)
+          .slice(0, MAX_VISIBLE_NODES);
 
         // Distribute nodes evenly
         const distributedNodes = distributeNodes(topNodes, center, radius);
@@ -208,29 +226,25 @@ const EntityGraph = () => {
               }).then((res) => res.json()),
             ),
           ).then((classifications) => {
-            // Create a map of new classifications
             const newClassifications = new Map(
               nodesToClassify.map((node, i) => [
-                node.title,
+                node.slug,
                 classifications[i].labels || [],
               ]),
             );
 
             const nodesWithLabels = distributedNodes.map((node) => ({
               ...node,
-              labels: newClassifications.get(node.title) || node.labels || [],
-              x: node.x,
-              y: node.y,
+              labels: newClassifications.get(node.slug) || node.labels || [],
             }));
             setNodes(nodesWithLabels);
             setEdges(calculateEdges());
           });
         } else {
-          // If all nodes have labels, just calculate edges
           setEdges(calculateEdges());
         }
       });
-  }, [dimensions, calculateEdges, getCenter]);
+  }, [dimensions, calculateEdges, getCenter, calculateNodeSize]);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -304,27 +318,53 @@ const EntityGraph = () => {
     }
   }, [nodes]);
 
-  // Simplify node color handling
-  const getNodeColor = (node: Node, index: number) => {
+  // Add category colors
+  const categoryColors = useMemo(() => {
+    const colors = new Map<string, string>();
+
+    uniqueLabels.forEach((label, index) => {
+      // Generate a pleasing HSL color
+      const hue = (index * 137.508) % 360; // Golden angle approximation
+      colors.set(label, `hsl(${hue}, 70%, 65%)`);
+    });
+
+    return colors;
+  }, [uniqueLabels]);
+
+  // Update node color to properly highlight trending and hovered nodes
+  const getNodeColor = useCallback((node: Node, index: number) => {
     const validLabels = node.labels?.filter(label => !IGNORED_LABELS.has(label)) || [];
+    const nodeSlug = node.title.toLowerCase().replace(/\s+/g, '-');
+    const isTrending = trendingTopics.some(topic => {
+      const topicSlug = topic.toLowerCase().replace(/\s+/g, '-');
+      return nodeSlug === topicSlug;
+    });
+    const isHoveredTrending = hoveredTrendingTopic &&
+      nodeSlug === hoveredTrendingTopic.toLowerCase().replace(/\s+/g, '-');
+
+    // Trending topic hover takes precedence
+    if (isHoveredTrending) {
+      return isDarkTheme ? "rgba(14, 165, 233, 1)" : "rgba(14, 165, 233, 1)"; // Full opacity sky-500
+    }
+
+    // Active trending topic
+    if (isTrending) {
+      return isDarkTheme ? "rgba(14, 165, 233, 0.8)" : "rgba(14, 165, 233, 0.8)"; // sky-500
+    }
+
+    // Rest of the color logic...
+    if (hoveredLabel && validLabels.length > 0) {
+      return validLabels.includes(hoveredLabel)
+        ? categoryColors.get(hoveredLabel) || `hsla(${index * 55}, 70%, 65%, 0.9)`
+        : isDarkTheme ? "hsla(0, 0%, 75%, 0.1)" : "hsla(0, 0%, 25%, 0.1)"; // More contrast for non-matching
+    }
 
     if (!validLabels.length) {
-      return "hsla(0, 0%, 75%, 0.7)";
+      return "hsla(0, 0%, 75%, 0.4)";
     }
 
-    if (hoveredLabel) {
-      return validLabels.includes(hoveredLabel)
-        ? categoryColors.get(hoveredLabel) ||
-        `hsla(${index * 55}, 70%, 65%, 0.9)`
-        : isDarkTheme
-          ? "hsla(0, 0%, 75%, 0.4)"
-          : "hsla(0, 0%, 25%, 0.4)";
-    }
-
-    return (
-      categoryColors.get(validLabels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`
-    );
-  };
+    return categoryColors.get(validLabels[0]) || `hsla(${index * 55}, 70%, 65%, 0.7)`;
+  }, [hoveredLabel, categoryColors, isDarkTheme, trendingTopics, hoveredTrendingTopic]);
 
   // Enhance edge styling for category-colored electricity
   const getEdgeStyle = (edge: Edge) => {
@@ -357,7 +397,7 @@ const EntityGraph = () => {
     };
   };
 
-  // Enhance SVG filters for better glow effect
+  // Add SVG definition for the glow effect
   const SvgFilters = () => (
     <defs>
       <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
@@ -376,21 +416,20 @@ const EntityGraph = () => {
           <feMergeNode in="SourceGraphic" />
         </feMerge>
       </filter>
+      <filter id="trending-glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="2" result="coloredBlur" />
+        <feColorMatrix
+          in="coloredBlur"
+          type="matrix"
+          values="0 0 0 0 0.055  0 0 0 0 0.647  0 0 0 0 0.914  0 0 0 0.3 0"
+        />
+        <feMerge>
+          <feMergeNode in="coloredBlur" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
     </defs>
   );
-
-  // Add category colors
-  const categoryColors = useMemo(() => {
-    const colors = new Map<string, string>();
-
-    uniqueLabels.forEach((label, index) => {
-      // Generate a pleasing HSL color
-      const hue = (index * 137.508) % 360; // Golden angle approximation
-      colors.set(label, `hsl(${hue}, 70%, 65%)`);
-    });
-
-    return colors;
-  }, [uniqueLabels]);
 
   useEffect(() => {
     const animate = () => {
@@ -436,9 +475,27 @@ const EntityGraph = () => {
       document.removeEventListener("selectRandomNode", handleRandomNode);
   }, [nodes, router]);
 
+  // Add the pulse animation style
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes pulse {
+        0% { filter: url(#trending-glow) brightness(0.95); }
+        50% { filter: url(#trending-glow) brightness(1.05); }
+        100% { filter: url(#trending-glow) brightness(0.95); }
+      }
+    `;
+    document.head.appendChild(style);
+
+    // Cleanup
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
+
   return (
     <div ref={containerRef} className="fixed inset-0 z-0">
-      <svg ref={svgRef} width="100%" height="100%" className="z-10">
+      <svg ref={svgRef} width="100%" height="100%" className="z-10 pt-16">
         <SvgFilters />
         <g className="edges">
           {edges.map((edge, i) => (
@@ -455,9 +512,17 @@ const EntityGraph = () => {
         </g>
 
         {nodes.map((node, i) => {
+          const nodeKey = `node-${node.slug}-${i}`;
+          const nodeSlug = node.title.toLowerCase().replace(/\s+/g, '-');
+          const isTrending = trendingTopics.some(topic =>
+            topic.toLowerCase().replace(/\s+/g, '-') === nodeSlug
+          );
+          const isHoveredTrending = hoveredTrendingTopic &&
+            nodeSlug === hoveredTrendingTopic.toLowerCase().replace(/\s+/g, '-');
+
           return (
             <g
-              key={node.slug}
+              key={nodeKey}
               transform={`translate(${node.x},${node.y})`}
               onClick={() => router.push(`/wiki/${node.slug}`)}
               className="group cursor-pointer"
@@ -467,32 +532,62 @@ const EntityGraph = () => {
                 r={node.size}
                 fill={getNodeColor(node, i)}
                 stroke={
-                  isDarkTheme
-                    ? "rgba(255, 255, 255, 0.3)"
-                    : "rgba(0, 0, 0, 0.3)"
+                  isHoveredTrending || isTrending
+                    ? "rgba(14, 165, 233, 0.5)"
+                    : isDarkTheme
+                      ? "rgba(255, 255, 255, 0.3)"
+                      : "rgba(0, 0, 0, 0.3)"
                 }
-                strokeWidth={0.25}
-                className="transition-all duration-150 hover:opacity-90 hover:scale-110"
-                transform={`scale(${nodeVisibility[i] ? 1 : 0.5})`}
+                strokeWidth={isHoveredTrending ? 1.5 : isTrending ? 0.75 : 0.25}
+                className={`transition-all duration-300 hover:opacity-90`}
+                filter={isTrending ? "url(#trending-glow)" : undefined}
+                style={isTrending ? {
+                  animation: isHoveredTrending ? 'none' : 'pulse 3s ease-in-out infinite'
+                } : undefined}
               />
               <text
                 dy="-10"
                 textAnchor="middle"
-                className={`text-xs transition-opacity duration-150 pointer-events-none 
+                className={`text-xs transition-opacity duration-300 pointer-events-none 
                   ${isDarkTheme ? "fill-white" : "fill-gray-800"} 
-                  ${hoveredLabel && node.labels?.includes(hoveredLabel)
+                  ${(hoveredLabel && node.labels?.includes(hoveredLabel)) || isHoveredTrending
                     ? "opacity-100"
                     : "opacity-0 group-hover:opacity-100"
                   }`}
               >
                 {node.title}
               </text>
+              {/* Add Bluesky logo for trending nodes on hover */}
+              {isTrending && (
+                <g transform={`translate(${-node.size * 0.6}, ${-node.size * 5})`}
+                  className={`transition-all duration-300 ${isHoveredTrending || hoveredTrendingTopic === node.title ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                >
+                  <image
+                    href="/bsky-logo.png"
+                    width={node.size * 1.2}
+                    height={node.size * 1.2}
+                    x={0}
+                    y={0}
+                    className="transition-all duration-300"
+                    opacity={0.95}
+                    filter="url(#trending-glow)"
+                  />
+                </g>
+              )}
             </g>
           );
         })}
       </svg>
 
-      {/* Replace the existing legend div with this new responsive version */}
+      {/* Left sidebar for trending topics */}
+      <div className="fixed left-0 top-16 bottom-0 z-20">
+        <TrendingTopics
+          onTrendingTopicsChange={setTrendingTopics}
+          onTopicHover={setHoveredTrendingTopic}
+        />
+      </div>
+
+      {/* Top bar for category labels */}
       <div className="fixed top-0 left-0 right-0 p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm z-20 transition-colors duration-200">
         <div className="max-w-screen-lg mx-auto">
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -500,8 +595,8 @@ const EntityGraph = () => {
               <div
                 key={label}
                 className="flex items-center space-x-2 cursor-pointer 
-                           hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
-                           px-3 py-1.5 rounded-full transition-colors"
+                         hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
+                         px-3 py-1.5 rounded-full transition-colors"
                 onMouseEnter={() => setHoveredLabel(label)}
                 onMouseLeave={() => setHoveredLabel(null)}
               >
