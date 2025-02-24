@@ -16,12 +16,21 @@ export interface TrendingResponse {
 
 export interface TrackVisitResponse {
     success: boolean;
+    error?: string;
     message?: string;
+    data?: {
+        title: string;
+        views: number;
+        lastVisited: number;
+        labels: Array<{ name: string; source: string }>;
+    };
+    totalEntities?: number;
 }
 
 export interface ClassificationResponse {
-    success: boolean;
-    labels: Label[];
+    success?: boolean;
+    labels: Label[];  // AI-generated labels
+    trendingLabels?: Label[];  // Trending topics
     explanation?: string;
     error?: string;
     details?: string;

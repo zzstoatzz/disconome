@@ -25,15 +25,8 @@ export interface StorageInterface {
 class BlobStorage implements StorageInterface {
     async get<T extends JsonValue>(path: string): Promise<T | null> {
         const key = withNamespace(path);
-
-        // Check cache first
-        const entry = cache.get(key);
-        if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
-            console.log(`🔄 Cache hit for ${key}`);
-            return entry.data as T;
-        }
-
         console.log(`📥 Fetching blob: ${key}`);
+
         const { blobs } = await list({ prefix: key });
         if (blobs.length === 0) {
             console.log(`❌ Blob not found: ${key}`);
@@ -41,13 +34,12 @@ class BlobStorage implements StorageInterface {
         }
 
         try {
-            const response = await fetch(blobs[0].url);
+            // Sort blobs by uploadedAt to get the latest version
+            const latestBlob = blobs
+                .sort((a, b) => (b.uploadedAt?.getTime() || 0) - (a.uploadedAt?.getTime() || 0))[0];
+
+            const response = await fetch(latestBlob.url);
             const data = await response.json();
-
-            // Update cache
-            cache.set(key, { data, timestamp: Date.now() });
-            console.log(`💾 Cached blob: ${key}`);
-
             return data as T;
         } catch (error) {
             console.error(`❌ Error fetching blob: ${key}`, error);
@@ -93,15 +85,21 @@ class BlobStorage implements StorageInterface {
         console.log(`📤 Putting blob: ${key}`);
 
         try {
-            await put(key, JSON.stringify(data), {
-                access: 'public',
-                addRandomSuffix: false
-            });
+            // Get existing data first
+            const existingData = await this.get<T>(path);
 
-            // Immediately cache the new data with version
-            const version = new Date().toISOString();
-            cache.set(key, { data, timestamp: Date.now(), version });
-            console.log(`💾 Cached new blob: ${key}`);
+            // Merge data if it's an object, otherwise use new data
+            const mergedData = (existingData && typeof existingData === 'object' && typeof data === 'object')
+                ? { ...existingData, ...data }
+                : data;
+
+            await put(key, JSON.stringify(mergedData), {
+                access: 'public',
+                addRandomSuffix: false,
+                cacheControlMaxAge: 0, // Disable caching
+                contentType: 'application/json'
+            });
+            console.log(`✅ Successfully put blob: ${key}`);
         } catch (error) {
             console.error(`❌ Error putting blob: ${key}`, error);
             throw error;

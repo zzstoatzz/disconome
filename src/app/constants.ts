@@ -1,7 +1,8 @@
 export const MAX_VISIBLE_NODES = 32;
-export const MAX_VISIBLE_LABELS = 6;
+export const MAX_VISIBLE_LABELS = 10;  // decreased from 10 to 8
+export const MIN_TRENDING_LABELS = 3;  // Ensure we keep at least 3 trending labels
 export const MAX_VISIBLE_SUGGESTIONS = 10;
-export const STATS_PATH = "stats/views.json";
+export const STATS_PATH = "stats/v1/views.json";
 export const CLASSIFICATIONS_PATH = "classifications/v3/"; // Incremented to v3
 export const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 

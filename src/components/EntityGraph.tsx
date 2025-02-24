@@ -12,7 +12,8 @@ import {
   MAX_VISIBLE_LABELS,
   MAX_VISIBLE_NODES,
   IGNORED_LABELS,
-  IGNORED_PAGES
+  IGNORED_PAGES,
+  MIN_TRENDING_LABELS
 } from "@/app/constants";
 import { Label } from "@/lib/types";
 import { ClassificationResponse } from "@/lib/api-types";
@@ -124,19 +125,20 @@ const EntityGraph = () => {
         if (processedPairs.has(pairKey)) return;
         processedPairs.add(pairKey);
 
-        const sharedLabels = source.labels?.filter((label) =>
-          target.labels?.some(tl => tl.name === label.name)
+        // Only connect nodes if they share AI-generated labels
+        const sharedAiLabels = source.labels?.filter((label) =>
+          label.source === 'ai' && target.labels?.some(tl => tl.name === label.name && tl.source === 'ai')
         ) || [];
 
-        if (sharedLabels.length > 0) {
+        if (sharedAiLabels.length > 0) {
           const strength = (source.count + target.count) / 2;
           newEdges.push({
             source,
             target,
-            labels: sharedLabels,
-            label: hoveredLabel && sharedLabels.some(l => l.name === hoveredLabel.name)
+            labels: sharedAiLabels,
+            label: hoveredLabel && sharedAiLabels.some(l => l.name === hoveredLabel.name)
               ? hoveredLabel
-              : sharedLabels[0],
+              : sharedAiLabels[0],
             strength,
           });
         }
@@ -209,12 +211,13 @@ const EntityGraph = () => {
         const distributedNodes = distributeNodes(topNodes, center, radius);
         setNodes(distributedNodes);
 
-        // Only classify nodes that don't have labels
+        // Only classify nodes that don't have AI-generated labels
         const nodesToClassify = distributedNodes.filter(
-          (node) => !node.labels?.length,
+          (node) => !node.labels?.some(label => label.source === 'ai')
         );
 
         if (nodesToClassify.length > 0) {
+          console.log(`🔍 Classifying ${nodesToClassify.length} nodes`);
           Promise.all(
             nodesToClassify.map((node) =>
               // First get Wikipedia data
@@ -246,8 +249,9 @@ const EntityGraph = () => {
                     console.error('Error in classification:', data.error);
                     return { labels: [], explanation: '' };
                   }
+
                   return {
-                    labels: data.labels || [],
+                    labels: data.labels, // Only use AI labels from classification
                     explanation: data.explanation || ''
                   };
                 })
@@ -267,15 +271,30 @@ const EntityGraph = () => {
               ]),
             );
 
-            const nodesWithLabels = distributedNodes.map((node) => ({
-              ...node,
-              labels: newClassifications.get(node.slug)?.labels || node.labels || [],
-              explanation: newClassifications.get(node.slug)?.explanation || node.explanation
-            }));
+            const nodesWithLabels = distributedNodes.map((node) => {
+              const classification = newClassifications.get(node.slug);
+              if (classification) {
+                // Keep any existing trending labels
+                const existingTrendingLabels = node.labels?.filter(l => l.source === 'trending') || [];
+                return {
+                  ...node,
+                  labels: [...classification.labels, ...existingTrendingLabels],
+                  explanation: classification.explanation || node.explanation
+                };
+              }
+              return node;
+            });
+
+            console.log("Updated nodes with labels:", nodesWithLabels.map(n => ({
+              title: n.title,
+              labels: n.labels?.map(l => `${l.name} (${l.source})`)
+            })));
+
             setNodes(nodesWithLabels);
             setEdges(calculateEdges());
           });
         } else {
+          console.log("No nodes need classification");
           setEdges(calculateEdges());
         }
       });
@@ -315,8 +334,8 @@ const EntityGraph = () => {
     // First add trending topics
     trendingTopics.forEach(topic => {
       labelCounts.set(topic.name, {
-        count: 1,  // Give trending topics a base count
-        nodeCount: 1,  // And a base node count
+        count: 1,
+        nodeCount: 1,
         source: 'trending'
       });
     });
@@ -330,14 +349,12 @@ const EntityGraph = () => {
           .forEach((label) => {
             const current = labelCounts.get(label.name);
             if (current) {
-              // If the label already exists, preserve trending source if it was trending
               labelCounts.set(label.name, {
                 count: current.count + (node.count || 0),
                 nodeCount: current.nodeCount + 1,
                 source: current.source === 'trending' ? 'trending' : label.source
               });
             } else {
-              // New label
               labelCounts.set(label.name, {
                 count: node.count || 0,
                 nodeCount: 1,
@@ -347,15 +364,20 @@ const EntityGraph = () => {
           });
       });
 
-    // Only show labels that have nodes or are trending
-    return Array.from(labelCounts.entries())
+    // Split labels into trending and AI
+    const allLabels = Array.from(labelCounts.entries())
       .filter(([, stats]) => stats.source === 'trending' || stats.nodeCount >= 2)
       .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, MAX_VISIBLE_LABELS)
       .map(([name, stats]) => ({
         name,
         source: stats.source
       }));
+
+    const trendingLabels = allLabels.filter(l => l.source === 'trending').slice(0, MAX_VISIBLE_LABELS - MIN_TRENDING_LABELS);
+    const aiLabels = allLabels.filter(l => l.source === 'ai').slice(0, MAX_VISIBLE_LABELS - MIN_TRENDING_LABELS);
+
+    // Combine trending and AI labels
+    return [...trendingLabels, ...aiLabels];
   }, [nodes, trendingTopics]);
 
   // Only log unique labels when they change and exist
@@ -554,15 +576,21 @@ const EntityGraph = () => {
       const matchingTopic = topics.find(topic =>
         topic.name.toLowerCase().replace(/\s+/g, '-') === nodeSlug
       );
+
       if (matchingTopic) {
-        // Remove any existing label with the same name but different source
-        const existingLabels = (node.labels || []).filter(l => l.name !== matchingTopic.name);
+        // Keep all existing labels, only update/add trending ones
+        const existingNonTrendingLabels = (node.labels || []).filter(l => l.source === 'ai');
         return {
           ...node,
-          labels: [...existingLabels, { ...matchingTopic, source: 'trending' }]
+          labels: [...existingNonTrendingLabels, { ...matchingTopic, source: 'trending' }]
         };
       }
-      return node;
+
+      // If no matching topic, remove any old trending labels but keep AI ones
+      return {
+        ...node,
+        labels: (node.labels || []).filter(l => l.source === 'ai')
+      };
     }));
   }, []);
 
@@ -661,20 +689,6 @@ const EntityGraph = () => {
               >
                 {node.title}
               </text>
-              {node.explanation && (isHighlighted || isTrending) && (
-                <foreignObject
-                  x={-150}
-                  y={node.size + 10}
-                  width="300"
-                  height="80"
-                  className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                >
-                  <div className="bg-gray-800/95 dark:bg-gray-700/95 text-white/90 p-3 rounded text-sm text-center">
-                    <div className="font-medium mb-1">Why this label?</div>
-                    {node.explanation}
-                  </div>
-                </foreignObject>
-              )}
               {isTrending && (
                 <g transform={`translate(${-node.size * 0.6}, ${-node.size * 3})`}
                   className={`transition-all duration-300 ${isHighlighted ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
@@ -701,28 +715,27 @@ const EntityGraph = () => {
         <div className="flex flex-col">
           {uniqueLabels.length > 0 && (
             <div className="p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transition-colors duration-200">
-              <div className="max-w-screen-lg mx-auto">
+              <div className="max-w-screen-2xl mx-auto">
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   {uniqueLabels.map((label) => {
                     const labelKey = `label-${label.name}-${label.source}`;
                     return (
                       <div
                         key={labelKey}
-                        className={`group/label relative flex items-center space-x-2 cursor-pointer 
-                                 hover:bg-gray-100/50 dark:hover:bg-gray-800/50
-                                 px-3 py-2 rounded-full transition-colors`}
+                        className={`flex items-center space-x-2 cursor-pointer 
+                                hover:bg-gray-100/50 dark:hover:bg-gray-800/50
+                                px-2 py-1 rounded-full transition-colors`}
                         onMouseEnter={() => setHoveredLabel(label)}
                         onMouseLeave={() => setHoveredLabel(null)}
                         onClick={() => {
                           if (label.source === 'trending') {
-                            // Open Bluesky feed in new tab
                             window.open(`https://bsky.app/search?q=${encodeURIComponent(label.name)}`, '_blank');
                           }
                         }}
                       >
                         {label.source === 'trending' ? (
                           <svg
-                            className="w-3 h-3 text-sky-500"
+                            className="w-2.5 h-2.5 text-sky-500"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -742,16 +755,6 @@ const EntityGraph = () => {
                         <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
                           {label.name}
                         </span>
-
-                        {/* Tooltip */}
-                        <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 
-                                    opacity-0 group-hover/label:opacity-100 transition-opacity
-                                    text-[10px] whitespace-nowrap bg-gray-800/95 dark:bg-gray-700/95 
-                                    text-white/90 px-2 py-1 rounded pointer-events-none">
-                          {label.source === 'trending'
-                            ? "Trending bsky topic - click to open feed"
-                            : "AI-identified common theme"}
-                        </div>
                       </div>
                     );
                   })}

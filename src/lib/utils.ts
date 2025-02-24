@@ -8,7 +8,8 @@ import { Classification, StatsMap } from "./types";
 export function slugify(title: string): string {
     return title
         .toLowerCase()
-        .replace(/[^a-z0-9-]/g, "-") // Replace any non-alphanumeric chars with dash
+        .replace(/[,]/g, "") // Remove commas
+        .replace(/[^a-z0-9]+/g, "-") // Replace any non-alphanumeric chars with dash
         .replace(/-+/g, "-") // Replace multiple dashes with single dash
         .replace(/^-|-$/g, ""); // Remove leading/trailing dashes
 }

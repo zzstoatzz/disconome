@@ -73,125 +73,133 @@ async function getClassificationsCache() {
 
 export async function POST(req: Request) {
   try {
-    const { title, extract, prompt } = await req.json();
+    const { title, extract } = await req.json();
     const slug = slugify(title);
+
+    // Get trending topics first since we need them regardless of cache
+    const trendingResponse = await fetch("https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrendingTopics");
+    if (!trendingResponse.ok) {
+      console.error(`Trending API error: ${trendingResponse.status} ${trendingResponse.statusText}`);
+      throw new Error(`Failed to fetch trending topics: ${trendingResponse.status}`);
+    }
+
+    const trendingData = await trendingResponse.json();
+    const trendingLabels = (trendingData.topics || []).map((t: { topic: string }) => ({
+      name: t.topic
+        .split(/\s+/)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(" "),
+      source: 'trending' as const
+    }));
 
     // Get cached classifications
     const classifications = await getClassificationsCache();
     const cached = classifications.get(slug);
 
+    // If we have a valid cache, return it with current trending topics
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-      return NextResponse.json({ labels: cached.labels });
+      console.log(`📦 Using cached classification for ${title}`);
+      return NextResponse.json({
+        labels: cached.labels,
+        trendingLabels,
+        explanation: cached.explanation
+      });
     }
 
-    // Get trending topics as potential labels
-    try {
-      // Make direct request to Bluesky API instead of going through our own endpoint
-      const trendingResponse = await fetch("https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrendingTopics");
+    // Check for existing classification in storage
+    const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
+    const existingClassification = await storage.get(classificationPath);
 
-      if (!trendingResponse.ok) {
-        console.error(`Trending API error: ${trendingResponse.status} ${trendingResponse.statusText}`);
-        throw new Error(`Failed to fetch trending topics: ${trendingResponse.status}`);
-      }
+    if (existingClassification && isClassification(existingClassification)) {
+      console.log(`📦 Using stored classification for ${title}`);
+      // Cache the result
+      classifications.set(slug, existingClassification);
+      return NextResponse.json({
+        labels: existingClassification.labels,
+        trendingLabels,
+        explanation: existingClassification.explanation
+      });
+    }
 
-      const data = await trendingResponse.json();
-      const trendingLabels = (data.topics || []).map((t: { topic: string }) => ({
-        name: t.topic
-          .split(/\s+/)
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(" "),
-        source: 'trending' as const
-      }));
+    console.log(`🤖 Generating new classification for ${title}`);
 
-      // Check for existing classification
-      const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
-      const existingClassification = await storage.get(classificationPath);
+    // Get current stats to find top viewed nodes
+    const stats = await storage.get(STATS_PATH);
+    const topNodes = stats && isStatsMap(stats)
+      ? Object.entries(stats)
+        .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
+        .slice(0, MAX_VISIBLE_NODES)
+        .map(([slug, data]) => ({
+          slug,
+          title: data.title,
+          views: data.views,
+          labels: data.labels?.filter(l => l.source === 'ai') || [], // Only use AI labels for context
+        }))
+      : [];
 
-      if (existingClassification && isClassification(existingClassification)) {
-        return NextResponse.json({ labels: existingClassification.labels });
-      }
-
-      // Get current stats to find top viewed nodes
-      const stats = await storage.get(STATS_PATH);
-      const topNodes = stats && isStatsMap(stats)
-        ? Object.entries(stats)
-          .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
-          .slice(0, MAX_VISIBLE_NODES)
-          .map(([slug, data]) => ({
-            slug,
-            title: data.title,
-            views: data.views,
-            labels: data.labels || [],
-          }))
-        : [];
-
-      // Generate classification considering top nodes and trending topics
-      const result = await generateObject({
-        model: openai("gpt-4o"),
-        schema: ClassificationSchema,
-        prompt: `${prompt || `Based on this Wikipedia description:
+    // Generate classification considering top nodes and trending topics
+    const result = await generateObject({
+      model: openai("gpt-4o"),
+      schema: ClassificationSchema,
+      prompt: `Based on this Wikipedia description:
 
 ${extract || 'No description available.'}
 
-Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities and trending topics:`}
+IMPORTANT: Select EXACTLY 1-3 labels for "${title}". You MUST follow these rules:
 
-              ${topNodes.length > 0 ? `Top viewed entities and their current labels:
-              ${topNodes.map((n) => `- ${n.title}: ${n.labels.join(", ")}`).join("\n")}` : ''}
+1. You MUST use EXACTLY 1-3 labels total - no more, no less
+2. CONSISTENCY IS CRITICAL - if someone has been labeled as a "Record Producer", use EXACTLY that label for others in that role, not "Producer" or "Music Producer"
+3. Look at the existing labels and trending topics first and reuse them EXACTLY when they fit - no variations allowed
+4. Only create new labels if none of the existing ones truly fit
+5. New labels must be broad enough to be reused for other similar entities
+6. If this entity is currently trending on Bluesky, make sure to capture relevant context about why (e.g. "Television Host" for a TV personality)
+7. CRITICAL: If this entity is related to any currently trending topics, you MUST include those exact trending topics as labels
 
-              Current trending topics that could be relevant labels:
-              ${trendingLabels.map((l: Label) => l.name).join(", ")}
+Here are ALL existing labels and trending topics (REUSE THESE EXACT LABELS when they fit):
+${topNodes.length > 0 ? topNodes.map((n) => `- ${n.title}: ${n.labels.map(l => l.name).join(", ")}`).join("\n") : 'No existing labels yet.'}
 
-              Focus on finding or creating categories that could meaningfully connect multiple entities.
-              If the content is clearly related to any of the trending topics, include those as labels.`,
-      });
+Currently trending on Bluesky: ${trendingLabels.map((l: Label) => l.name).join(", ")}
 
-      // Transform AI-generated labels to include source
-      const aiLabels = result.object.labels.map(label => ({
-        name: label,
-        source: 'ai' as const
-      }));
+Remember: If this entity is related to any of the trending topics listed above, you MUST include those exact trending topics as labels.`
+    });
 
-      // Combine AI-generated labels with any matching trending topics
-      const finalLabels = [...new Set([
-        ...aiLabels,
-        ...trendingLabels.filter((tl: Label) =>
-          title.toLowerCase().includes(tl.name.toLowerCase()) ||
-          aiLabels.some(al =>
-            al.name.toLowerCase().includes(tl.name.toLowerCase()) ||
-            tl.name.toLowerCase().includes(al.name.toLowerCase())
-          )
-        )
-      ])];
-
-      const classification: Classification = {
-        labels: finalLabels,
-        explanation: result.object.explanation,
-        timestamp: Date.now(),
-        title,
+    // Transform AI-generated labels to include source
+    const aiLabels = result.object.labels.map(label => {
+      // Check if this label matches a trending topic
+      const matchingTrending = trendingLabels.find((t: Label) => t.name.toLowerCase() === label.toLowerCase());
+      return {
+        name: matchingTrending ? matchingTrending.name : label,
+        source: matchingTrending ? 'trending' as const : 'ai' as const
       };
+    });
 
-      // Store classification using storage interface
-      await storage.put(classificationPath, classification);
+    // Store only AI-generated labels in classification
+    const classification: Classification = {
+      labels: aiLabels,
+      explanation: result.object.explanation,
+      timestamp: Date.now(),
+      title,
+    };
 
-      // Cache the result
-      classifications.set(slug, classification);
+    // Store classification using storage interface
+    await storage.put(classificationPath, classification);
 
-      return NextResponse.json(classification);
-    } catch (error) {
-      console.error("Error in classification process:", error);
-      // Return a more specific error response
-      return NextResponse.json({
-        error: "Classification failed",
-        details: error instanceof Error ? error.message : String(error),
-        labels: []
-      }, { status: 500 });
-    }
-  } catch (error) {
-    console.error("Error parsing request:", error);
+    // Cache the result
+    classifications.set(slug, classification);
+
+    // Return both AI and trending labels separately
     return NextResponse.json({
-      error: "Invalid request",
+      labels: aiLabels,
+      trendingLabels,
+      explanation: result.object.explanation
+    });
+  } catch (error) {
+    console.error("Error in classification process:", error);
+    return NextResponse.json({
+      error: "Classification failed",
       details: error instanceof Error ? error.message : String(error),
-      labels: []
-    }, { status: 400 });
+      labels: [],
+      trendingLabels: []
+    }, { status: 500 });
   }
 }

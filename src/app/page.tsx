@@ -59,49 +59,11 @@ function HomeContent() {
   };
 
   return (
-    <main className="h-full relative grid place-items-center">
-      <div className="fixed inset-0 transition-colors duration-500">
+    <main className="h-full relative">
+      <div className="fixed inset-0">
         <ErrorBoundary>
           <EntityGraph />
         </ErrorBoundary>
-      </div>
-
-      <div className="fixed top-4 left-4 z-20">
-        <div className="group relative">
-          <button
-            className="p-2 rounded-full bg-white/90 dark:bg-gray-800/90 
-                     shadow-lg backdrop-blur-sm hover:bg-white dark:hover:bg-gray-700 
-                     transition-all duration-200 text-gray-800 dark:text-gray-200"
-            aria-label="What is this?"
-          >
-            ?
-          </button>
-          <div
-            className="absolute left-0 top-full mt-2 w-72 p-4 rounded-lg 
-                      bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm shadow-lg 
-                      invisible group-hover:visible opacity-0 group-hover:opacity-100 
-                      transition-all duration-200
-                      sm:w-72 w-[calc(100vw-2rem)] max-w-[90vw]
-                      text-gray-800 dark:text-gray-200"
-          >
-            <h3 className="font-bold mb-2">What is this?</h3>
-            <p className="text-sm mb-2 text-gray-600 dark:text-gray-300">
-              A graph of Wikipedia entities most viewed via this site. A
-              wikipedia entity is just what I&apos;m calling the header of a
-              wikipedia page + what an LLM produces as a structured timeline for
-              that page. In the graph, nodes are sized by popularity and members
-              of groups by label (as labeled by the LLM).
-            </p>
-            <a
-              href="https://github.com/zzstoatzz/disconome"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              Learn more →
-            </a>
-          </div>
-        </div>
       </div>
 
       <div className="fixed bottom-6 left-6 z-20">
@@ -120,42 +82,46 @@ function HomeContent() {
         </button>
       </div>
 
-      <div
-        className={`relative z-10 w-full max-w-md transition-opacity duration-300 ${isContentVisible ? "opacity-100" : "opacity-0 pointer-events-none"
-          }`}
-      >
-        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-6 sm:mb-8 md:mb-12 text-gray-800 dark:text-gray-100 text-center">
-          discono.me
-        </h1>
-        <div className="w-full relative backdrop-blur-sm bg-white/90 dark:bg-gray-800/90 p-4 rounded-lg sm:bg-transparent sm:dark:bg-transparent sm:backdrop-blur-none sm:p-0">
-          <form ref={formRef} onSubmit={handleSubmit} className="relative">
-            <input
-              type="text"
-              value={query}
-              onChange={handleQueryChange}
-              placeholder="submit a wikipedia page ..."
-              className="w-full p-4 pr-12 text-sm font-mono border-2 border-gray-200 dark:border-gray-700 
-                       rounded-lg focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 
-                       focus:ring-0 text-gray-700 dark:text-gray-100 placeholder-gray-400 
-                       dark:placeholder-gray-500 bg-white dark:bg-gray-800 shadow-sm
-                       transition duration-200 ease-in-out"
-              autoFocus
-            />
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-gray-400">
-              {isLoading ? (
-                <LoadingSpinner />
-              ) : (
-                query && <span className="text-sm">↵</span>
-              )}
+      <div className="fixed inset-0 flex items-center justify-center pointer-events-none">
+        <div
+          className={`w-full max-w-md mt-16 transition-opacity duration-300 pointer-events-auto ${isContentVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+            }`}
+        >
+          <div className="flex flex-col items-center gap-12">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-800 dark:text-gray-100 text-center">
+              discono.me
+            </h1>
+            <div className="w-full relative backdrop-blur-sm bg-white/90 dark:bg-gray-800/90 p-4 rounded-lg sm:bg-transparent sm:dark:bg-transparent sm:backdrop-blur-none sm:p-0">
+              <form ref={formRef} onSubmit={handleSubmit} className="relative">
+                <input
+                  type="text"
+                  value={query}
+                  onChange={handleQueryChange}
+                  placeholder="submit a wikipedia page ..."
+                  className="w-full p-4 pr-12 text-sm font-mono border-2 border-gray-200 dark:border-gray-700 
+                           rounded-lg focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 
+                           focus:ring-0 text-gray-700 dark:text-gray-100 placeholder-gray-400 
+                           dark:placeholder-gray-500 bg-white dark:bg-gray-800 shadow-sm
+                           transition duration-200 ease-in-out"
+                  autoFocus
+                />
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-gray-400">
+                  {isLoading ? (
+                    <LoadingSpinner />
+                  ) : (
+                    query && <span className="text-sm">↵</span>
+                  )}
+                </div>
+              </form>
+
+              <SearchSuggestions
+                suggestions={suggestions}
+                onSelect={handleSuggestionSelect}
+              />
+
+              <Leaderboard />
             </div>
-          </form>
-
-          <SearchSuggestions
-            suggestions={suggestions}
-            onSelect={handleSuggestionSelect}
-          />
-
-          <Leaderboard />
+          </div>
         </div>
       </div>
 
