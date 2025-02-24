@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { Label } from "@/lib/types";
 
 type Entity = {
   slug: string;
   title: string;
   count: number;
-  labels: string[];
+  labels: Label[];
 };
 
 export function Leaderboard() {
@@ -79,6 +80,18 @@ export function Leaderboard() {
                 <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                   {entry.count} views
                 </p>
+                {entry.labels && entry.labels.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {entry.labels.map((label, i) => (
+                      <span
+                        key={`${entry.slug}-${label.name}-${i}`}
+                        className="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                      >
+                        {label.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </Link>
           ))}

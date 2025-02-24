@@ -5,6 +5,8 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { z } from "zod";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { slugify } from "@/lib/utils";
+import { TrackVisitResponse } from "@/lib/api-types";
 
 const schema = z.object({
   events: z.object({
@@ -65,7 +67,7 @@ async function getWikiData(name: string) {
 
 const hasVisited = (slug: string) => {
   try {
-    const normalizedSlug = slug.toLowerCase();
+    const normalizedSlug = slugify(slug);
     const visits = JSON.parse(localStorage.getItem("visits") || "{}");
     return !!visits[normalizedSlug];
   } catch {
@@ -75,7 +77,7 @@ const hasVisited = (slug: string) => {
 
 const markVisited = (slug: string) => {
   try {
-    const normalizedSlug = slug.toLowerCase();
+    const normalizedSlug = slugify(slug);
     const visits = JSON.parse(localStorage.getItem("visits") || "{}");
     visits[normalizedSlug] = Date.now();
     localStorage.setItem("visits", JSON.stringify(visits));
@@ -88,6 +90,7 @@ export default function ClientPage({ slug }: { slug: string }) {
   const [wikiData, setWikiData] = useState<WikiData | null>(null);
   const [hasRequested, setHasRequested] = useState(false);
   const [isWikiLoading, setIsWikiLoading] = useState(true);
+  const [visitError, setVisitError] = useState<string | null>(null);
 
   const {
     object: eventData,
@@ -136,32 +139,38 @@ export default function ClientPage({ slug }: { slug: string }) {
 
   // Track visit when Wikipedia data is loaded
   useEffect(() => {
-    if (wikiData && !hasVisited(slug)) {
-      fetch("/api/track-visit", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          slug,
-          title: wikiData.title,
-        }),
-      })
-        .then(async (response) => {
+    async function trackVisit() {
+      if (wikiData && !hasVisited(slug)) {
+        try {
+          const response = await fetch("/api/track-visit", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              slug,
+              title: wikiData.title,
+            }),
+          });
+
           if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
           }
-          const data = await response.json();
 
-          // Mark as visited if we get a successful response with views
-          if (data.views) {
+          const data = await response.json() as TrackVisitResponse;
+          if (data.success) {
             markVisited(slug);
+          } else {
+            setVisitError(data.message || "Failed to track visit");
           }
-        })
-        .catch((error) => {
+        } catch (error) {
           console.error("❌ Visit tracking - Failed:", error);
-        });
+          setVisitError("Failed to track visit. Please try again later.");
+        }
+      }
     }
+
+    trackVisit();
   }, [slug, wikiData]);
 
   // Debug logs for timeline generation
@@ -233,6 +242,12 @@ export default function ClientPage({ slug }: { slug: string }) {
           </a>
         )}
       </nav>
+
+      {visitError && (
+        <div className="mb-4 p-4 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg">
+          {visitError}
+        </div>
+      )}
 
       <div className="mb-8">
         <h1 className="text-4xl font-mono mb-2 text-gray-900 dark:text-white">

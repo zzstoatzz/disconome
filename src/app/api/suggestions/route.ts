@@ -2,15 +2,14 @@
 import { NextResponse } from "next/server";
 import { MAX_VISIBLE_SUGGESTIONS } from "@/app/constants";
 import { storage } from "@/lib/storage";
+import { StatsMap } from "@/lib/types";
+import { slugify } from "@/lib/utils";
+import { STATS_PATH } from "@/app/constants";
 
-type StatsData = {
+interface Suggestion {
   title: string;
-  views: number;
-  labels?: string[];
-  lastVisited?: number;
-};
-
-type StatsMap = Record<string, StatsData>;
+  slug: string;
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -22,7 +21,7 @@ export async function GET(request: Request) {
 
   try {
     // Fetch viewed items from stats
-    const stats = await storage.get("stats/views.json") as StatsMap;
+    const stats = await storage.get<StatsMap>(STATS_PATH);
     if (!stats) {
       return NextResponse.json([]);
     }
@@ -36,11 +35,11 @@ export async function GET(request: Request) {
       }))
       .filter(item =>
         item.title?.toLowerCase().includes(query) ||
-        item.slug.includes(query)
+        slugify(item.title).includes(query)
       )
       .sort((a, b) => b.count - a.count)
       .slice(0, MAX_VISIBLE_SUGGESTIONS)
-      .map(({ title, slug }) => ({
+      .map(({ title, slug }): Suggestion => ({
         title,
         slug,
       }));

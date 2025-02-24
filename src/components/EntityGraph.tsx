@@ -14,11 +14,8 @@ import {
   IGNORED_LABELS,
   IGNORED_PAGES
 } from "@/app/constants";
-
-type Label = {
-  name: string;
-  source: 'trending' | 'ai';
-};
+import { Label } from "@/lib/types";
+import { ClassificationResponse } from "@/lib/api-types";
 
 type Node = {
   slug: string;
@@ -28,6 +25,7 @@ type Node = {
   count: number;
   title: string;
   labels?: Label[];
+  explanation?: string;
   isClassified?: boolean;
   loggedMatch?: boolean;
 };
@@ -37,7 +35,7 @@ type Edge = {
   target: Node;
   label: Label;
   labels: Label[];
-  strength: number; // Combined view count
+  strength: number;
 };
 
 const EntityGraph = () => {
@@ -47,7 +45,7 @@ const EntityGraph = () => {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-  const dataFetchedRef = useRef(false); // Prevent duplicate fetches
+  const dataFetchedRef = useRef(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const [time, setTime] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
@@ -110,7 +108,7 @@ const EntityGraph = () => {
     return isTrending ? baseSize * 1.5 : baseSize;
   }, [trendingTopics]);
 
-  // Update calculateEdges to handle Labels
+  // Update calculateEdges to include explanations
   const calculateEdges = useCallback(() => {
     const newEdges: Edge[] = [];
     const processedPairs = new Set<string>();
@@ -223,19 +221,43 @@ const EntityGraph = () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ title: node.title }),
-              }).then((res) => res.json()),
+              })
+                .then((res) => {
+                  if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                  }
+                  return res.json();
+                })
+                .then((data: ClassificationResponse) => {
+                  if (data.error) {
+                    console.error('Error in classification:', data.error);
+                    return { labels: [], explanation: '' };
+                  }
+                  return {
+                    labels: data.labels || [],
+                    explanation: data.explanation || ''
+                  };
+                })
+                .catch((error) => {
+                  console.error('Error classifying node:', error);
+                  return { labels: [], explanation: '' };
+                }),
             ),
           ).then((classifications) => {
             const newClassifications = new Map(
               nodesToClassify.map((node, i) => [
                 node.slug,
-                classifications[i].labels || [],
+                {
+                  labels: classifications[i].labels || [],
+                  explanation: classifications[i].explanation || ''
+                }
               ]),
             );
 
             const nodesWithLabels = distributedNodes.map((node) => ({
               ...node,
-              labels: newClassifications.get(node.slug) || node.labels || [],
+              labels: newClassifications.get(node.slug)?.labels || node.labels || [],
+              explanation: newClassifications.get(node.slug)?.explanation || node.explanation
             }));
             setNodes(nodesWithLabels);
             setEdges(calculateEdges());
@@ -245,6 +267,13 @@ const EntityGraph = () => {
         }
       });
   }, [dimensions, calculateEdges, getCenter, calculateNodeSize]);
+
+  // Add effect to recalculate edges when nodes are updated
+  useEffect(() => {
+    if (nodes.length > 0) {
+      setEdges(calculateEdges());
+    }
+  }, [nodes, calculateEdges]);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -382,7 +411,7 @@ const EntityGraph = () => {
 
     if (isHighlighted) {
       const categoryColor =
-        categoryColors.get(hoveredLabel!.name) || "hsl(210, 100%, 75%)";
+        categoryColors.get(hoveredLabel.name) || "hsl(210, 100%, 75%)";
       const hue = parseInt(categoryColor.match(/hsl\((\d+)/)?.[1] || "210");
 
       const dashLength = 1.5 + Math.sin(time * 0.1) * 0.5;
@@ -550,17 +579,27 @@ const EntityGraph = () => {
       <svg ref={svgRef} width="100%" height="100%" className="z-10 pt-16">
         <SvgFilters />
         <g className="edges">
-          {edges.map((edge, i) => (
-            <line
-              key={`edge-${i}`}
-              x1={edge.source.x}
-              y1={edge.source.y}
-              x2={edge.target.x}
-              y2={edge.target.y}
-              style={getEdgeStyle(edge)}
-              className="transition-all duration-300"
-            />
-          ))}
+          {edges.map((edge, i) => {
+            return (
+              <g
+                key={`edge-${i}`}
+                className="group"
+                onMouseEnter={() => setHoveredLabel(edge.label)}
+                onMouseLeave={() => setHoveredLabel(null)}
+                onTouchStart={() => setHoveredLabel(edge.label)}
+                onTouchEnd={() => setHoveredLabel(null)}
+              >
+                <line
+                  x1={edge.source.x}
+                  y1={edge.source.y}
+                  x2={edge.target.x}
+                  y2={edge.target.y}
+                  style={getEdgeStyle(edge)}
+                  className="transition-all duration-300"
+                />
+              </g>
+            );
+          })}
         </g>
 
         {nodes.map((node, i) => {
@@ -569,6 +608,8 @@ const EntityGraph = () => {
           const isTrending = trendingTopics.some(topic =>
             topic.name.toLowerCase().replace(/\s+/g, '-') === nodeSlug
           );
+          const activeLabel = hoveredLabel;
+          const isHighlighted = activeLabel && node.labels?.some(l => l.name === activeLabel.name);
 
           return (
             <g
@@ -600,16 +641,30 @@ const EntityGraph = () => {
                 textAnchor="middle"
                 className={`text-xs transition-opacity duration-300 pointer-events-none 
                   ${isDarkTheme ? "fill-white" : "fill-gray-800"} 
-                  ${(hoveredLabel && node.labels?.some(l => l.name === hoveredLabel.name)) || isTrending
+                  ${(isHighlighted) || isTrending
                     ? "opacity-100"
                     : "opacity-0 group-hover:opacity-100"
                   }`}
               >
                 {node.title}
               </text>
+              {node.explanation && (isHighlighted || isTrending) && (
+                <foreignObject
+                  x={-150}
+                  y={node.size + 10}
+                  width="300"
+                  height="80"
+                  className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                >
+                  <div className="bg-gray-800/95 dark:bg-gray-700/95 text-white/90 p-3 rounded text-sm text-center">
+                    <div className="font-medium mb-1">Why this label?</div>
+                    {node.explanation}
+                  </div>
+                </foreignObject>
+              )}
               {isTrending && (
                 <g transform={`translate(${-node.size * 0.6}, ${-node.size * 3})`}
-                  className={`transition-all duration-300 ${hoveredLabel && node.labels?.some(l => l.name === hoveredLabel.name) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                  className={`transition-all duration-300 ${isHighlighted ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                 >
                   <image
                     href="/bsky-logo.png"
@@ -640,11 +695,17 @@ const EntityGraph = () => {
                     return (
                       <div
                         key={labelKey}
-                        className="group/label relative flex items-center space-x-2 cursor-pointer 
-                                 hover:bg-gray-100/50 dark:hover:bg-gray-800/50 
-                                 px-3 py-1.5 rounded-full transition-colors"
+                        className={`group/label relative flex items-center space-x-2 cursor-pointer 
+                                 hover:bg-gray-100/50 dark:hover:bg-gray-800/50
+                                 px-3 py-2 rounded-full transition-colors`}
                         onMouseEnter={() => setHoveredLabel(label)}
                         onMouseLeave={() => setHoveredLabel(null)}
+                        onClick={() => {
+                          if (label.source === 'trending') {
+                            // Open Bluesky feed in new tab
+                            window.open(`https://bsky.app/search?q=${encodeURIComponent(label.name)}`, '_blank');
+                          }
+                        }}
                       >
                         {label.source === 'trending' ? (
                           <svg
@@ -675,7 +736,7 @@ const EntityGraph = () => {
                                     text-[10px] whitespace-nowrap bg-gray-800/95 dark:bg-gray-700/95 
                                     text-white/90 px-2 py-1 rounded pointer-events-none">
                           {label.source === 'trending'
-                            ? "Trending topic on Bluesky"
+                            ? "Trending bsky topic - click to open bsky feed"
                             : "AI-identified common theme"}
                         </div>
                       </div>

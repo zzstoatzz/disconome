@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { openai } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { put, list } from "@vercel/blob";
-import { StatsMap } from "@/types";
+import { storage } from "@/lib/storage";
+import { Classification, Label } from "@/lib/types";
+import { slugify, isClassification, isStatsMap } from "@/lib/utils";
 import {
   MAX_VISIBLE_NODES,
   MAX_VISIBLE_LABELS,
@@ -17,25 +18,10 @@ const ClassificationSchema = z.object({
   explanation: z.string(),
 });
 
-// Helper to sanitize paths for blob storage
-function sanitizePath(path: string): string {
-  return path
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-") // Replace any non-alphanumeric chars with dash
-    .replace(/-+/g, "-") // Replace multiple dashes with single dash
-    .replace(/^-|-$/g, ""); // Remove leading/trailing dashes
-}
-
 // Add new cache management
 let classificationsCache: {
   timestamp: number;
-  data: Map<
-    string,
-    {
-      labels: string[];
-      timestamp: number;
-    }
-  >;
+  data: Map<string, Classification>;
 } | null = null;
 
 // Add new helper function
@@ -49,25 +35,24 @@ async function getClassificationsCache() {
   }
 
   try {
-    // Fetch all classifications at once
-    const { blobs } = await list({ prefix: CLASSIFICATIONS_PATH });
-    const newCache = new Map();
+    // Use storage interface to list classifications
+    const paths = await storage.list(CLASSIFICATIONS_PATH);
+    const newCache = new Map<string, Classification>();
 
     // Process in parallel
     await Promise.all(
-      blobs.map(async (blob) => {
+      paths.map(async (path) => {
         try {
-          const data = await (await fetch(blob.url)).json();
-          const slug = blob.pathname
-            .replace(`${CLASSIFICATIONS_PATH}`, "")
-            .replace(".json", "");
-          newCache.set(slug, {
-            labels: Array.isArray(data.labels) ? data.labels : [],
-            timestamp: data.timestamp || Date.now(),
-          });
+          const data = await storage.get(path);
+          if (isClassification(data)) {
+            const slug = path
+              .replace(CLASSIFICATIONS_PATH, "")
+              .replace(".json", "");
+            newCache.set(slug, data);
+          }
         } catch (error) {
           console.error(
-            `Error loading classification: ${blob.pathname}`,
+            `Error loading classification: ${path}`,
             error,
           );
         }
@@ -89,7 +74,7 @@ async function getClassificationsCache() {
 export async function POST(req: Request) {
   try {
     const { title, prompt } = await req.json();
-    const slug = sanitizePath(title);
+    const slug = slugify(title);
 
     // Get cached classifications
     const classifications = await getClassificationsCache();
@@ -100,111 +85,110 @@ export async function POST(req: Request) {
     }
 
     // Get trending topics as potential labels
-    const trendingResponse = await fetch(new URL("/api/trending", req.url));
-    const trendingData = await trendingResponse.json();
-    const trendingLabels = (trendingData.labels || []).map((l: { name: string }) => ({
-      name: l.name,
-      source: 'trending'
-    }));
+    try {
+      // Use absolute URL construction
+      const trendingUrl = new URL("/api/trending", process.env.NEXT_PUBLIC_APP_URL || req.url);
+      const trendingResponse = await fetch(trendingUrl);
 
-    // Check for existing classification first
-    const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
-    const { blobs: classificationBlobs } = await list({
-      prefix: classificationPath,
-    });
-    if (classificationBlobs.length > 0) {
-      const existingClassification = await (
-        await fetch(classificationBlobs[0].url)
-      ).json();
-      // Ensure labels is always an array and include source
-      const existingLabels = Array.isArray(existingClassification.labels)
-        ? existingClassification.labels.map((l: string) => ({ name: l, source: 'ai' }))
-        : [];
-      return NextResponse.json({ labels: existingLabels });
-    }
+      if (!trendingResponse.ok) {
+        console.error(`Trending API error: ${trendingResponse.status} ${trendingResponse.statusText}`);
+        throw new Error(`Failed to fetch trending topics: ${trendingResponse.status}`);
+      }
 
-    // Get current stats to find top viewed nodes
-    const { blobs } = await list({ prefix: "stats/" });
-    const statsBlob = blobs.find((b) => b.pathname === STATS_PATH);
-    if (!statsBlob) {
-      return NextResponse.json({ error: "No stats found" }, { status: 404 });
-    }
-
-    const stats: StatsMap = await (await fetch(statsBlob.url)).json();
-
-    // Get top viewed nodes and their labels
-    const topNodes = Object.entries(stats)
-      .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
-      .slice(0, MAX_VISIBLE_NODES)
-      .map(([slug, data]) => ({
-        slug,
-        title: data.title,
-        views: data.views,
-        labels: data.labels || [],
+      const trendingData = await trendingResponse.json();
+      const trendingLabels = (trendingData.labels || []).map((l: { name: string; source: string }) => ({
+        name: l.name,
+        source: 'trending' as const
       }));
 
-    // Generate classification considering top nodes and trending topics
-    const result = await generateObject({
-      model: openai("gpt-4o"),
-      schema: ClassificationSchema,
-      prompt: `${prompt || `Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities and trending topics:`}
+      // Check for existing classification
+      const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
+      const existingClassification = await storage.get(classificationPath);
 
-            Top viewed entities and their current labels:
-            ${topNodes.map((n) => `- ${n.title}: ${n.labels.join(", ")}`).join("\n")}
+      if (existingClassification && isClassification(existingClassification)) {
+        return NextResponse.json({ labels: existingClassification.labels });
+      }
 
-            Current trending topics that could be relevant labels:
-            ${trendingLabels.map((l: { name: string }) => l.name).join(", ")}
+      // Get current stats to find top viewed nodes
+      const stats = await storage.get(STATS_PATH);
+      if (!stats || !isStatsMap(stats)) {
+        return NextResponse.json({ error: "No stats found" }, { status: 404 });
+      }
 
-            Focus on finding or creating categories that could meaningfully connect multiple entities.
-            If the content is clearly related to any of the trending topics, include those as labels.`,
-    });
+      // Get top viewed nodes and their labels
+      const topNodes = Object.entries(stats)
+        .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
+        .slice(0, MAX_VISIBLE_NODES)
+        .map(([slug, data]) => ({
+          slug,
+          title: data.title,
+          views: data.views,
+          labels: data.labels || [],
+        }));
 
-    // Transform AI-generated labels to include source
-    const aiLabels = result.object.labels.map(label => ({
-      name: label,
-      source: 'ai'
-    }));
+      // Generate classification considering top nodes and trending topics
+      const result = await generateObject({
+        model: openai("gpt-4o"),
+        schema: ClassificationSchema,
+        prompt: `${prompt || `Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities and trending topics:`}
 
-    // Combine AI-generated labels with any matching trending topics
-    const finalLabels = [...new Set([
-      ...aiLabels,
-      ...trendingLabels.filter((tl: { name: string }) =>
-        title.toLowerCase().includes(tl.name.toLowerCase()) ||
-        aiLabels.some(al =>
-          al.name.toLowerCase().includes(tl.name.toLowerCase()) ||
-          tl.name.toLowerCase().includes(al.name.toLowerCase())
+              Top viewed entities and their current labels:
+              ${topNodes.map((n) => `- ${n.title}: ${n.labels.join(", ")}`).join("\n")}
+
+              Current trending topics that could be relevant labels:
+              ${trendingLabels.map((l: Label) => l.name).join(", ")}
+
+              Focus on finding or creating categories that could meaningfully connect multiple entities.
+              If the content is clearly related to any of the trending topics, include those as labels.`,
+      });
+
+      // Transform AI-generated labels to include source
+      const aiLabels = result.object.labels.map(label => ({
+        name: label,
+        source: 'ai' as const
+      }));
+
+      // Combine AI-generated labels with any matching trending topics
+      const finalLabels = [...new Set([
+        ...aiLabels,
+        ...trendingLabels.filter((tl: Label) =>
+          title.toLowerCase().includes(tl.name.toLowerCase()) ||
+          aiLabels.some(al =>
+            al.name.toLowerCase().includes(tl.name.toLowerCase()) ||
+            tl.name.toLowerCase().includes(al.name.toLowerCase())
+          )
         )
-      )
-    ])];
+      ])];
 
-    const finalResult = {
-      ...result.object,
-      labels: finalLabels
-    };
-
-    // Store classification
-    await put(
-      classificationPath,
-      JSON.stringify({
-        ...finalResult,
+      const classification: Classification = {
+        labels: finalLabels,
+        explanation: result.object.explanation,
         timestamp: Date.now(),
         title,
-      }),
-      {
-        access: "public",
-        addRandomSuffix: false,
-      },
-    );
+      };
 
-    // Cache the result
-    classifications.set(slug, {
-      labels: finalLabels,
-      timestamp: Date.now(),
-    });
+      // Store classification using storage interface
+      await storage.put(classificationPath, classification);
 
-    return NextResponse.json(finalResult);
+      // Cache the result
+      classifications.set(slug, classification);
+
+      return NextResponse.json(classification);
+    } catch (error) {
+      console.error("Error in classification process:", error);
+      // Return a more specific error response
+      return NextResponse.json({
+        error: "Classification failed",
+        details: error instanceof Error ? error.message : String(error),
+        labels: []
+      }, { status: 500 });
+    }
   } catch (error) {
-    console.error("Error classifying entity:", error);
-    return NextResponse.json({ labels: [] });
+    console.error("Error parsing request:", error);
+    return NextResponse.json({
+      error: "Invalid request",
+      details: error instanceof Error ? error.message : String(error),
+      labels: []
+    }, { status: 400 });
   }
 }
