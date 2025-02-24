@@ -25,4 +25,5 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 export type CacheEntry<T> = {
     data: T;
     timestamp: number;
+    version?: string;
 }; 

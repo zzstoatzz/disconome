@@ -59,68 +59,95 @@ export async function POST(req: Request) {
     const normalizedTitle = normalizeTitle(title);
     console.log(`📥 POST /api/track-visit - Tracking visit for: ${normalizedTitle}`);
 
-    // Get current stats
-    let currentStats = await storage.get<StatsMap>(STATS_PATH);
+    // Maximum number of retries for optimistic locking
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
+    let lastError = null;
 
-    // Initialize stats if they don't exist
-    if (!currentStats) {
-      console.log("📝 POST /api/track-visit - Creating new stats file");
-      currentStats = {};
-    }
+    while (retryCount < MAX_RETRIES) {
+      try {
+        // Get current stats with version
+        const { data: currentStats, version } = await storage.getWithVersion<StatsMap>(STATS_PATH);
 
-    // Check if we already have an entry with this title
-    const existingEntry = Object.entries(currentStats).find(([, data]) =>
-      normalizeTitle(data.title) === normalizedTitle
-    );
+        // Initialize stats if they don't exist
+        const stats = currentStats || {};
 
-    if (existingEntry) {
-      const [existingSlug, existingData] = existingEntry;
+        // Check if we already have an entry with this title
+        const existingEntry = Object.entries(stats).find(([, data]) =>
+          normalizeTitle(data.title) === normalizedTitle
+        );
 
-      // If the existing entry has a different slug, combine them
-      if (existingSlug !== slug) {
-        console.log(`🔄 Combining duplicate entries for "${normalizedTitle}"`);
-        // Delete the old entry
-        delete currentStats[slug];
-        // Update the existing entry
-        const updatedEntry: StatsData = {
-          title: normalizedTitle,
-          views: (existingData.views || 0) + 1,
-          lastVisited: Date.now(),
-          labels: existingData.labels || []  // Preserve existing labels
-        };
-        currentStats[existingSlug] = updatedEntry;
+        let updatedStats: StatsMap;
+        let updatedEntry: StatsData;
 
-        // Save updated stats
-        await storage.put(STATS_PATH, currentStats);
-        console.log(`✅ POST /api/track-visit - Combined and updated views for ${normalizedTitle} to ${updatedEntry.views}`);
-        return NextResponse.json({ success: true, data: updatedEntry });
+        if (existingEntry) {
+          const [existingSlug, existingData] = existingEntry;
+
+          // If the existing entry has a different slug, combine them
+          if (existingSlug !== slug) {
+            console.log(`🔄 Combining duplicate entries for "${normalizedTitle}"`);
+            // Create new stats object to avoid modifying the original
+            updatedStats = { ...stats };
+            delete updatedStats[slug];
+
+            updatedEntry = {
+              title: normalizedTitle,
+              views: (existingData.views || 0) + 1,
+              lastVisited: Date.now(),
+              labels: existingData.labels || []
+            };
+            updatedStats[existingSlug] = updatedEntry;
+          } else {
+            // If it's the same slug, just update the views
+            updatedStats = { ...stats };
+            updatedEntry = {
+              title: normalizedTitle,
+              views: (existingData.views || 0) + 1,
+              lastVisited: Date.now(),
+              labels: existingData.labels || []
+            };
+            updatedStats[existingSlug] = updatedEntry;
+          }
+        } else {
+          // Create new entry if it doesn't exist
+          updatedStats = { ...stats };
+          updatedEntry = {
+            title: normalizedTitle,
+            views: 1,
+            lastVisited: Date.now(),
+            labels: []
+          };
+          updatedStats[slug] = updatedEntry;
+          console.log(`📝 POST /api/track-visit - Created new entry for ${normalizedTitle}`);
+        }
+
+        // Try to save with version check
+        const success = await storage.putWithVersion(STATS_PATH, updatedStats, version);
+
+        if (success) {
+          console.log(`✅ POST /api/track-visit - Updated views for ${normalizedTitle} to ${updatedEntry.views}`);
+          return NextResponse.json({ success: true, data: updatedEntry });
+        }
+
+        // If version check failed, retry
+        console.log(`⚠️ POST /api/track-visit - Version conflict, retrying (${retryCount + 1}/${MAX_RETRIES})`);
+        retryCount++;
+
+      } catch (error) {
+        lastError = error;
+        console.error(`❌ POST /api/track-visit - Error on attempt ${retryCount + 1}:`, error);
+        retryCount++;
       }
-
-      // If it's the same slug, just update the views
-      const updatedEntry: StatsData = {
-        title: normalizedTitle,
-        views: (existingData.views || 0) + 1,
-        lastVisited: Date.now(),
-        labels: existingData.labels || []  // Preserve existing labels
-      };
-      currentStats[existingSlug] = updatedEntry;
-    } else {
-      // Create new entry if it doesn't exist
-      const newEntry: StatsData = {
-        title: normalizedTitle,
-        views: 1,
-        lastVisited: Date.now(),
-        labels: []  // Initialize empty labels array
-      };
-      currentStats[slug] = newEntry;
-      console.log(`📝 POST /api/track-visit - Created new entry for ${normalizedTitle}`);
     }
 
-    // Save updated stats
-    await storage.put(STATS_PATH, currentStats);
-    console.log(`✅ POST /api/track-visit - Updated views for ${normalizedTitle} to ${currentStats[slug].views}`);
+    // If we get here, we've exhausted our retries
+    console.error(`❌ POST /api/track-visit - Failed after ${MAX_RETRIES} attempts`);
+    return NextResponse.json({
+      success: false,
+      error: "Failed to update stats after multiple attempts",
+      details: lastError instanceof Error ? lastError.message : String(lastError)
+    }, { status: 500 });
 
-    return NextResponse.json({ success: true, data: currentStats[slug] });
   } catch (error) {
     console.error("❌ POST /api/track-visit - Error:", error);
     return NextResponse.json({
