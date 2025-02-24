@@ -217,11 +217,24 @@ const EntityGraph = () => {
         if (nodesToClassify.length > 0) {
           Promise.all(
             nodesToClassify.map((node) =>
-              fetch("/api/classify", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: node.title }),
-              })
+              // First get Wikipedia data
+              fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&titles=${encodeURIComponent(node.title)}&origin=*`)
+                .then(res => res.json())
+                .then(data => {
+                  const pages = data.query.pages;
+                  const pageId = Object.keys(pages)[0];
+                  const extract = pageId !== "-1" ? pages[pageId].extract : "";
+
+                  // Then classify with the extract
+                  return fetch("/api/classify", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      title: node.title,
+                      extract: extract
+                    }),
+                  });
+                })
                 .then((res) => {
                   if (!res.ok) {
                     throw new Error(`HTTP error! status: ${res.status}`);

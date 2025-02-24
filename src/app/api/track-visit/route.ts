@@ -20,8 +20,21 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    // Transform data to array format
+    // Transform data to array format and ensure all entries are valid
     const transformedData = Object.entries(stats)
+      .filter(([, entity]) => {
+        // Filter out invalid entries
+        const isValid = entity &&
+          typeof entity === 'object' &&
+          'title' in entity &&
+          'views' in entity &&
+          entity.views > 0;
+
+        if (!isValid) {
+          console.warn("⚠️ GET /api/track-visit - Found invalid entry:", entity);
+        }
+        return isValid;
+      })
       .map(([slug, entity]) => ({
         slug,
         title: entity.title,
@@ -29,10 +42,9 @@ export async function GET() {
         lastVisited: entity.lastVisited,
         labels: entity.labels || [],
       }))
-      .filter(entry => entry.count > 0)
       .sort((a, b) => b.count - a.count);
 
-    console.log(`📊 GET /api/track-visit - Found ${transformedData.length} entities`);
+    console.log(`📊 GET /api/track-visit - Found ${transformedData.length} valid entities`);
     return NextResponse.json(transformedData);
   } catch (error) {
     console.error("❌ GET /api/track-visit - Error:", error);
@@ -70,39 +82,43 @@ export async function POST(req: Request) {
         // Delete the old entry
         delete currentStats[slug];
         // Update the existing entry
-        currentStats[existingSlug] = {
-          ...existingData,
-          title: normalizedTitle, // Use normalized title
+        const updatedEntry: StatsData = {
+          title: normalizedTitle,
           views: (existingData.views || 0) + 1,
           lastVisited: Date.now(),
+          labels: existingData.labels || []  // Preserve existing labels
         };
+        currentStats[existingSlug] = updatedEntry;
 
         // Save updated stats
         await storage.put(STATS_PATH, currentStats);
-        console.log(`✅ POST /api/track-visit - Combined and updated views for ${normalizedTitle} to ${currentStats[existingSlug].views}`);
-        return NextResponse.json({ success: true, data: currentStats[existingSlug] });
+        console.log(`✅ POST /api/track-visit - Combined and updated views for ${normalizedTitle} to ${updatedEntry.views}`);
+        return NextResponse.json({ success: true, data: updatedEntry });
       }
 
       // If it's the same slug, just update the views
-      currentStats[existingSlug] = {
-        ...existingData,
-        title: normalizedTitle, // Use normalized title
+      const updatedEntry: StatsData = {
+        title: normalizedTitle,
         views: (existingData.views || 0) + 1,
         lastVisited: Date.now(),
+        labels: existingData.labels || []  // Preserve existing labels
       };
+      currentStats[existingSlug] = updatedEntry;
     } else {
-      // Create new entry
+      // Create new entry if it doesn't exist
       const newEntry: StatsData = {
-        title: normalizedTitle, // Use normalized title
+        title: normalizedTitle,
         views: 1,
         lastVisited: Date.now(),
+        labels: []  // Initialize empty labels array
       };
       currentStats[slug] = newEntry;
+      console.log(`📝 POST /api/track-visit - Created new entry for ${normalizedTitle}`);
     }
 
     // Save updated stats
     await storage.put(STATS_PATH, currentStats);
-    console.log(`✅ POST /api/track-visit - Updated views for ${normalizedTitle}`);
+    console.log(`✅ POST /api/track-visit - Updated views for ${normalizedTitle} to ${currentStats[slug].views}`);
 
     return NextResponse.json({ success: true, data: currentStats[slug] });
   } catch (error) {
