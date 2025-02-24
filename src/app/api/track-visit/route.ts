@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { storage } from "@/lib/storage";
-import { StatsData, StatsMap } from "@/lib/types";
-import { slugify } from "@/lib/utils";
-import { STATS_PATH } from "@/app/constants";
+import { StatsMap, Label } from "@/lib/types";
+import { slugify, isClassification } from "@/lib/utils";
+import { STATS_PATH, CLASSIFICATIONS_PATH } from "@/app/constants";
 
 // Helper function to normalize title casing
 function normalizeTitle(title: string): string {
@@ -17,143 +17,235 @@ export async function GET() {
     const stats = await storage.get<StatsMap>(STATS_PATH);
     if (!stats) {
       console.log("📊 GET /api/track-visit - No stats found");
-      return NextResponse.json([]);
+      return new NextResponse(JSON.stringify([]), {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        }
+      });
     }
 
-    // Transform data to array format and ensure all entries are valid
-    const transformedData = Object.entries(stats)
-      .filter(([, entity]) => {
-        // Filter out invalid entries
-        const isValid = entity &&
-          typeof entity === 'object' &&
-          'title' in entity &&
-          'views' in entity &&
-          entity.views > 0;
+    console.log(`📊 GET /api/track-visit - Raw stats has ${Object.keys(stats).length} entries`);
 
-        if (!isValid) {
-          console.warn("⚠️ GET /api/track-visit - Found invalid entry:", entity);
+    // Get all classifications first
+    const classificationPaths = await storage.list(CLASSIFICATIONS_PATH);
+    console.log(`📊 Found ${classificationPaths.length} classification paths`);
+
+    const classifications = new Map();
+
+    // Load all classifications in parallel
+    await Promise.all(
+      classificationPaths.map(async (path) => {
+        try {
+          const data = await storage.get(path);
+          if (isClassification(data)) {
+            const slug = path.replace(CLASSIFICATIONS_PATH, "").replace(".json", "");
+            console.log(`📑 Classification for ${slug}:`, {
+              labels: data.labels?.map(l => `${l.name} (${l.source})`),
+              explanation: data.explanation?.slice(0, 50) + '...'
+            });
+            classifications.set(slug, data);
+          }
+        } catch (error) {
+          console.error(`Error loading classification: ${path}`, error);
         }
-        return isValid;
       })
-      .map(([slug, entity]) => ({
-        slug,
-        title: entity.title,
-        count: entity.views || 0,
-        lastVisited: entity.lastVisited,
-        labels: entity.labels || [],
-      }))
+    );
+
+    // Transform data to array format
+    const transformedData = Object.entries(stats)
+      .map(([slug, entity]) => {
+        // Basic structure validation
+        const isValidStructure = entity &&
+          typeof entity === 'object' &&
+          'title' in entity;
+
+        if (!isValidStructure) {
+          console.warn("⚠️ GET /api/track-visit - Skipping malformed entry:", entity);
+          return null;
+        }
+
+        // Use existing views, defaulting to 1 if missing
+        const views = ('views' in entity && typeof entity.views === 'number' && entity.views >= 1)
+          ? entity.views
+          : 1;
+
+        // Get classification if it exists
+        const classification = classifications.get(slug);
+        console.log(`🔍 Processing ${entity.title} (${slug}):`, {
+          classificationLabels: classification?.labels?.map((l: Label) => `${l.name} (${l.source})`)
+        });
+
+        return {
+          slug,
+          title: entity.title,
+          count: views,
+          lastVisited: entity.lastVisited || Date.now(),
+          labels: classification?.labels || [],
+          explanation: classification?.explanation
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
       .sort((a, b) => b.count - a.count);
 
-    console.log(`📊 GET /api/track-visit - Found ${transformedData.length} valid entities`);
-    return NextResponse.json(transformedData);
+    console.log(`📊 GET /api/track-visit - Returning ${transformedData.length} valid entities`);
+    console.log("Labels summary:", transformedData.map(e => ({
+      title: e.title,
+      labels: e.labels?.map((l: Label) => `${l.name} (${l.source})`)
+    })));
+
+    return new NextResponse(JSON.stringify(transformedData), {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      }
+    });
   } catch (error) {
     console.error("❌ GET /api/track-visit - Error:", error);
-    return NextResponse.json([]);
+    return new NextResponse(JSON.stringify([]), {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      }
+    });
   }
 }
 
 export async function POST(req: Request) {
   try {
-    const { slug: rawSlug, title } = await req.json();
-    const slug = slugify(rawSlug);
+    const { title, extract } = await req.json();
+    const slug = slugify(title);
     const normalizedTitle = normalizeTitle(title);
     console.log(`📥 POST /api/track-visit - Tracking visit for: ${normalizedTitle}`);
 
-    // Maximum number of retries for optimistic locking
-    const MAX_RETRIES = 3;
-    let retryCount = 0;
-    let lastError = null;
+    // Get current stats
+    const stats = await storage.get<StatsMap>(STATS_PATH) || {};
+    console.log(`📊 Current stats has ${Object.keys(stats).length} entries`);
 
-    while (retryCount < MAX_RETRIES) {
+    // Check if we already have an entry with this title
+    const existingEntry = Object.entries(stats).find(([, data]) =>
+      normalizeTitle(data.title) === normalizedTitle
+    );
+
+    // Create new stats object with all existing entries
+    const updatedStats = { ...stats };
+
+    if (existingEntry) {
+      const [existingSlug] = existingEntry;
+      // Update just this entry - without labels
+      updatedStats[existingSlug] = {
+        title: normalizedTitle,
+        views: (stats[existingSlug].views || 0) + 1,
+        lastVisited: Date.now()
+      };
+      console.log(`✅ POST /api/track-visit - Updated views for ${normalizedTitle} to ${updatedStats[existingSlug].views}`);
+    } else {
+      // Add new entry - without labels
+      updatedStats[slug] = {
+        title: normalizedTitle,
+        views: 1,
+        lastVisited: Date.now()
+      };
+      console.log(`📝 POST /api/track-visit - Created new entry for ${normalizedTitle}`);
+    }
+
+    // Classify the entity if extract is provided
+    let classificationLabels: Label[] = [];
+    if (extract) {
       try {
-        // Get current stats with version
-        const { data: currentStats, version } = await storage.getWithVersion<StatsMap>(STATS_PATH);
-
-        // Initialize stats if they don't exist
-        const stats = currentStats || {};
-
-        // Check if we already have an entry with this title
-        const existingEntry = Object.entries(stats).find(([, data]) =>
-          normalizeTitle(data.title) === normalizedTitle
+        // Get all existing classifications for context
+        const existingClassifications = await storage.list(CLASSIFICATIONS_PATH);
+        const existingLabels = await Promise.all(
+          existingClassifications.map(async (path) => {
+            const data = await storage.get(path);
+            if (isClassification(data)) {
+              return data.labels;
+            }
+            return [];
+          })
         );
 
-        let updatedStats: StatsMap;
-        let updatedEntry: StatsData;
+        // Flatten and filter unique labels for context
+        const uniqueExistingLabels = Array.from(new Set(
+          existingLabels.flat().filter(Boolean).map(l => l.name)
+        ));
 
-        if (existingEntry) {
-          const [existingSlug, existingData] = existingEntry;
+        console.log(`🏷️ Existing labels for context:`, uniqueExistingLabels);
 
-          // If the existing entry has a different slug, combine them
-          if (existingSlug !== slug) {
-            console.log(`🔄 Combining duplicate entries for "${normalizedTitle}"`);
-            // Create new stats object to avoid modifying the original
-            updatedStats = { ...stats };
-            delete updatedStats[slug];
+        const classifyResponse = await fetch('http://localhost:3000/api/classify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title,
+            extract,
+            existingLabels: uniqueExistingLabels // Pass existing labels for context
+          }),
+        });
 
-            updatedEntry = {
-              title: normalizedTitle,
-              views: (existingData.views || 0) + 1,
-              lastVisited: Date.now(),
-              labels: existingData.labels || []
-            };
-            updatedStats[existingSlug] = updatedEntry;
-          } else {
-            // If it's the same slug, just update the views
-            updatedStats = { ...stats };
-            updatedEntry = {
-              title: normalizedTitle,
-              views: (existingData.views || 0) + 1,
-              lastVisited: Date.now(),
-              labels: existingData.labels || []
-            };
-            updatedStats[existingSlug] = updatedEntry;
-          }
-        } else {
-          // Create new entry if it doesn't exist
-          updatedStats = { ...stats };
-          updatedEntry = {
-            title: normalizedTitle,
-            views: 1,
-            lastVisited: Date.now(),
-            labels: []
-          };
-          updatedStats[slug] = updatedEntry;
-          console.log(`📝 POST /api/track-visit - Created new entry for ${normalizedTitle}`);
+        if (classifyResponse.ok) {
+          const classification = await classifyResponse.json();
+          const targetSlug = existingEntry ? existingEntry[0] : slug;
+
+          // Log the classification response
+          console.log(`🤖 Classification response for ${title}:`, {
+            aiLabels: classification.labels?.map((l: Label) => `${l.name} (${l.source})`),
+            trendingLabels: classification.trendingLabels?.map((l: Label) => `${l.name} (${l.source})`)
+          });
+
+          // Only include trending labels that match the entity title
+          const matchingTrendingLabels = (classification.trendingLabels || [])
+            .filter((topic: { name: string; source: 'trending' }) => {
+              const topicSlug = slugify(topic.name);
+              const entitySlug = slugify(title);
+              return topicSlug === entitySlug;
+            });
+
+          // Combine AI and matching trending labels
+          classificationLabels = [...(classification.labels || []), ...matchingTrendingLabels];
+
+          // Save classification
+          await storage.put(`${CLASSIFICATIONS_PATH}${targetSlug}.json`, {
+            labels: classificationLabels,
+            explanation: classification.explanation,
+            timestamp: Date.now()
+          });
+
+          console.log(`💾 Saved classification for ${title}:`, {
+            labels: classificationLabels.map((l: Label) => `${l.name} (${l.source})`),
+            explanation: classification.explanation?.slice(0, 50) + '...'
+          });
         }
-
-        // Try to save with version check
-        const success = await storage.putWithVersion(STATS_PATH, updatedStats, version);
-
-        if (success) {
-          console.log(`✅ POST /api/track-visit - Updated views for ${normalizedTitle} to ${updatedEntry.views}`);
-          return NextResponse.json({ success: true, data: updatedEntry });
-        }
-
-        // If version check failed, retry
-        console.log(`⚠️ POST /api/track-visit - Version conflict, retrying (${retryCount + 1}/${MAX_RETRIES})`);
-        retryCount++;
-
       } catch (error) {
-        lastError = error;
-        console.error(`❌ POST /api/track-visit - Error on attempt ${retryCount + 1}:`, error);
-        retryCount++;
+        console.error("Failed to classify entity:", error);
       }
     }
 
-    // If we get here, we've exhausted our retries
-    console.error(`❌ POST /api/track-visit - Failed after ${MAX_RETRIES} attempts`);
-    return NextResponse.json({
-      success: false,
-      error: "Failed to update stats after multiple attempts",
-      details: lastError instanceof Error ? lastError.message : String(lastError)
-    }, { status: 500 });
+    // Save stats object (without labels)
+    await storage.put(STATS_PATH, updatedStats);
 
+    // Return response with labels from classification
+    return new NextResponse(JSON.stringify({
+      success: true,
+      data: {
+        ...updatedStats[existingEntry ? existingEntry[0] : slug],
+        labels: classificationLabels
+      },
+      totalEntities: Object.keys(updatedStats).length
+    }), {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      }
+    });
   } catch (error) {
     console.error("❌ POST /api/track-visit - Error:", error);
-    return NextResponse.json({
+    return new NextResponse(JSON.stringify({
       success: false,
       error: "Failed to track visit",
       details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    }), {
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      }
+    });
   }
 }
