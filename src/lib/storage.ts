@@ -1,9 +1,7 @@
 import { put, list } from "@vercel/blob";
+import { JsonValue, CacheEntry } from "@/lib/types";
 
 // Simple in-memory cache to store blob data for a short time
-type CacheEntry<T> = { data: T; timestamp: number };
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-
 const cache = new Map<string, CacheEntry<JsonValue>>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 

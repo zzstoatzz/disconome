@@ -1,16 +1,8 @@
 import { NextResponse } from "next/server";
 import { storage } from "@/lib/storage";
-
-const STATS_FILE = "stats/views.json";
-
-type StatsData = {
-  title: string;
-  views: number;
-  labels?: string[];
-  lastVisited: number;
-};
-
-type StatsMap = Record<string, StatsData>;
+import { StatsData, StatsMap } from "@/lib/types";
+import { slugify } from "@/lib/utils";
+import { STATS_PATH } from "@/app/constants";
 
 // Helper function to normalize title casing
 function normalizeTitle(title: string): string {
@@ -22,7 +14,7 @@ function normalizeTitle(title: string): string {
 
 export async function GET() {
   try {
-    const stats = await storage.get(STATS_FILE) as StatsMap;
+    const stats = await storage.get<StatsMap>(STATS_PATH);
     if (!stats) {
       console.log("📊 GET /api/track-visit - No stats found");
       return NextResponse.json([]);
@@ -50,12 +42,13 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { slug, title } = await req.json();
+    const { slug: rawSlug, title } = await req.json();
+    const slug = slugify(rawSlug);
     const normalizedTitle = normalizeTitle(title);
     console.log(`📥 POST /api/track-visit - Tracking visit for: ${normalizedTitle}`);
 
     // Get current stats
-    let currentStats = await storage.get(STATS_FILE) as StatsMap;
+    let currentStats = await storage.get<StatsMap>(STATS_PATH);
 
     // Initialize stats if they don't exist
     if (!currentStats) {
@@ -85,9 +78,9 @@ export async function POST(req: Request) {
         };
 
         // Save updated stats
-        await storage.put(STATS_FILE, currentStats);
+        await storage.put(STATS_PATH, currentStats);
         console.log(`✅ POST /api/track-visit - Combined and updated views for ${normalizedTitle} to ${currentStats[existingSlug].views}`);
-        return NextResponse.json(currentStats[existingSlug]);
+        return NextResponse.json({ success: true, data: currentStats[existingSlug] });
       }
 
       // If it's the same slug, just update the views
@@ -99,20 +92,25 @@ export async function POST(req: Request) {
       };
     } else {
       // Create new entry
-      currentStats[slug] = {
+      const newEntry: StatsData = {
         title: normalizedTitle, // Use normalized title
         views: 1,
         lastVisited: Date.now(),
       };
+      currentStats[slug] = newEntry;
     }
 
     // Save updated stats
-    await storage.put(STATS_FILE, currentStats);
+    await storage.put(STATS_PATH, currentStats);
     console.log(`✅ POST /api/track-visit - Updated views for ${normalizedTitle}`);
 
-    return NextResponse.json(currentStats[slug]);
+    return NextResponse.json({ success: true, data: currentStats[slug] });
   } catch (error) {
     console.error("❌ POST /api/track-visit - Error:", error);
-    return NextResponse.json({ error: "Failed to track visit" }, { status: 500 });
+    return NextResponse.json({
+      success: false,
+      error: "Failed to track visit",
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
   }
 }

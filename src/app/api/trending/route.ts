@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Label } from "@/lib/types";
 
 const BLUESKY_API = "https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrendingTopics";
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -7,7 +8,7 @@ const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 let memoryCache: {
     data: {
         topics: Array<{ topic: string }>;
-        labels: Array<{ name: string; source: string; timestamp: number }>;
+        labels: Label[];
     };
     timestamp: number;
 } | null = null;
@@ -46,7 +47,7 @@ export async function GET() {
             topics,
             labels: topics.map((t: { topic: string }) => ({
                 name: normalizeTopicAsLabel(t.topic),
-                source: 'trending',
+                source: 'trending' as const,
                 timestamp: Date.now()
             }))
         };
