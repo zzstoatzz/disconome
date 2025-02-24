@@ -73,7 +73,7 @@ async function getClassificationsCache() {
 
 export async function POST(req: Request) {
   try {
-    const { title, prompt } = await req.json();
+    const { title, extract, prompt } = await req.json();
     const slug = slugify(title);
 
     // Get cached classifications
@@ -129,7 +129,11 @@ export async function POST(req: Request) {
       const result = await generateObject({
         model: openai("gpt-4o"),
         schema: ClassificationSchema,
-        prompt: `${prompt || `Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities and trending topics:`}
+        prompt: `${prompt || `Based on this Wikipedia description:
+
+${extract || 'No description available.'}
+
+Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities and trending topics:`}
 
               ${topNodes.length > 0 ? `Top viewed entities and their current labels:
               ${topNodes.map((n) => `- ${n.title}: ${n.labels.join(", ")}`).join("\n")}` : ''}
