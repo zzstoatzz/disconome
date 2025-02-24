@@ -86,18 +86,20 @@ export async function POST(req: Request) {
 
     // Get trending topics as potential labels
     try {
-      // Use absolute URL construction
-      const trendingUrl = new URL("/api/trending", process.env.NEXT_PUBLIC_APP_URL || req.url);
-      const trendingResponse = await fetch(trendingUrl);
+      // Make direct request to Bluesky API instead of going through our own endpoint
+      const trendingResponse = await fetch("https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrendingTopics");
 
       if (!trendingResponse.ok) {
         console.error(`Trending API error: ${trendingResponse.status} ${trendingResponse.statusText}`);
         throw new Error(`Failed to fetch trending topics: ${trendingResponse.status}`);
       }
 
-      const trendingData = await trendingResponse.json();
-      const trendingLabels = (trendingData.labels || []).map((l: { name: string; source: string }) => ({
-        name: l.name,
+      const data = await trendingResponse.json();
+      const trendingLabels = (data.topics || []).map((t: { topic: string }) => ({
+        name: t.topic
+          .split(/\s+/)
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(" "),
         source: 'trending' as const
       }));
 
@@ -111,20 +113,17 @@ export async function POST(req: Request) {
 
       // Get current stats to find top viewed nodes
       const stats = await storage.get(STATS_PATH);
-      if (!stats || !isStatsMap(stats)) {
-        return NextResponse.json({ error: "No stats found" }, { status: 404 });
-      }
-
-      // Get top viewed nodes and their labels
-      const topNodes = Object.entries(stats)
-        .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
-        .slice(0, MAX_VISIBLE_NODES)
-        .map(([slug, data]) => ({
-          slug,
-          title: data.title,
-          views: data.views,
-          labels: data.labels || [],
-        }));
+      const topNodes = stats && isStatsMap(stats)
+        ? Object.entries(stats)
+          .sort((a, b) => (b[1].views || 0) - (a[1].views || 0))
+          .slice(0, MAX_VISIBLE_NODES)
+          .map(([slug, data]) => ({
+            slug,
+            title: data.title,
+            views: data.views,
+            labels: data.labels || [],
+          }))
+        : [];
 
       // Generate classification considering top nodes and trending topics
       const result = await generateObject({
@@ -132,8 +131,8 @@ export async function POST(req: Request) {
         schema: ClassificationSchema,
         prompt: `${prompt || `Classify "${title}" into 1-3 categories that could connect it to these frequently viewed entities and trending topics:`}
 
-              Top viewed entities and their current labels:
-              ${topNodes.map((n) => `- ${n.title}: ${n.labels.join(", ")}`).join("\n")}
+              ${topNodes.length > 0 ? `Top viewed entities and their current labels:
+              ${topNodes.map((n) => `- ${n.title}: ${n.labels.join(", ")}`).join("\n")}` : ''}
 
               Current trending topics that could be relevant labels:
               ${trendingLabels.map((l: Label) => l.name).join(", ")}
