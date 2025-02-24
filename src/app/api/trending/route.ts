@@ -39,6 +39,11 @@ export async function GET() {
 
         // Fetch fresh data from Bluesky
         const response = await fetch(BLUESKY_API);
+
+        if (!response.ok) {
+            throw new Error(`Bluesky API error: ${response.status} ${response.statusText}`);
+        }
+
         const data = await response.json();
         const topics = ensureTopicsArray(data);
 
@@ -64,7 +69,7 @@ export async function GET() {
         return NextResponse.json({
             topics: [],
             labels: [],
-            error: "Failed to fetch trending topics"
+            error: error instanceof Error ? error.message : "Failed to fetch trending topics"
         }, { status: 500 });
     }
 } 

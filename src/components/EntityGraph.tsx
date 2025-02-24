@@ -736,7 +736,7 @@ const EntityGraph = () => {
                                     text-[10px] whitespace-nowrap bg-gray-800/95 dark:bg-gray-700/95 
                                     text-white/90 px-2 py-1 rounded pointer-events-none">
                           {label.source === 'trending'
-                            ? "Trending bsky topic - click to open bsky feed"
+                            ? "Trending bsky topic - click to open feed"
                             : "AI-identified common theme"}
                         </div>
                       </div>

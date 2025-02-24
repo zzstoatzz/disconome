@@ -3,7 +3,7 @@
 import { openai } from "@ai-sdk/openai";
 import { streamObject } from "ai";
 import { z } from "zod";
-import { put, list } from "@vercel/blob";
+import { storage } from "@/lib/storage";
 import { createHash } from "crypto";
 
 const schema = z.object({
@@ -31,13 +31,11 @@ export async function POST(req: Request) {
       .slice(0, 10);
 
     const blobPath = `events/${prompt.toLowerCase().replace(/\s+/g, "-")}-${contentHash}.json`;
-    const blobs = await list({ prefix: blobPath });
+    const existingData = await storage.get(blobPath);
 
-    if (blobs.blobs.length > 0) {
+    if (existingData) {
       console.log("📦 Found cached data");
-      const response = await fetch(blobs.blobs[0].url);
-      const data = await response.json();
-      return new Response(JSON.stringify(data), {
+      return new Response(JSON.stringify(existingData), {
         headers: {
           "x-cache": "HIT",
         },
@@ -65,13 +63,9 @@ extrapolate as needed to make at least 3 timeline events.
     // Stream the response to the client
     const response = result.toTextStreamResponse();
 
-    // Save final object to blob storage after streaming starts
+    // Save final object to storage after streaming starts
     result.object.then(async (finalObject) => {
-      await put(blobPath, JSON.stringify(finalObject), {
-        access: "public",
-        addRandomSuffix: false,
-        token: process.env.BLOB_READ_WRITE_TOKEN,
-      });
+      await storage.put(blobPath, finalObject);
     });
 
     return new Response(response.body, {

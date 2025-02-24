@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchBlobWithCache } from "@/utils/blob";
+import { storage } from "@/lib/storage";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const data = await fetchBlobWithCache(path);
+    const data = await storage.get(path);
     return NextResponse.json(data);
   } catch (error) {
     console.error("Error in blob route:", error);
