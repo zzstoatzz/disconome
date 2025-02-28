@@ -17,6 +17,10 @@ import {
 import { Label } from "@/lib/types";
 import { ClassificationResponse } from "@/lib/api-types";
 
+// Static variables to prevent duplicate fetching in strict mode
+const isDataFetched = { current: false };
+const isTrendingFetched = { current: false };
+
 type Node = {
   slug: string;
   x: number;
@@ -42,10 +46,12 @@ const EntityGraph = () => {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [hoveredLabel, setHoveredLabel] = useState<Label | null>(null);
+  const [selectedLabel, setSelectedLabel] = useState<Label | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const containerRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const dataFetchedRef = useRef(false);
+  const dataFetchingInProgressRef = useRef(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const [time, setTime] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
@@ -183,8 +189,10 @@ const EntityGraph = () => {
 
   // Update the data fetching effect to use the new calculateNodeSize
   useEffect(() => {
-    if (dataFetchedRef.current) return;
-    dataFetchedRef.current = true;
+    // Prevent duplicate fetches
+    if (dataFetchedRef.current || dataFetchingInProgressRef.current || isDataFetched.current) return;
+    dataFetchingInProgressRef.current = true;
+    isDataFetched.current = true;
 
     fetch("/api/track-visit")
       .then((res) => res.json())
@@ -212,6 +220,7 @@ const EntityGraph = () => {
         // Distribute nodes evenly
         const distributedNodes = distributeNodes(topNodes, center, radius);
         setNodes(distributedNodes);
+        dataFetchedRef.current = true;
 
         // Only classify nodes that don't have AI-generated labels
         const nodesToClassify = distributedNodes.filter(
@@ -220,49 +229,51 @@ const EntityGraph = () => {
 
         if (nodesToClassify.length > 0) {
           console.log(`🔍 Classifying ${nodesToClassify.length} nodes`);
-          Promise.all(
-            nodesToClassify.map((node) =>
-              // First get Wikipedia data
-              fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&titles=${encodeURIComponent(node.title)}&origin=*`)
-                .then(res => res.json())
-                .then(data => {
-                  const pages = data.query.pages;
-                  const pageId = Object.keys(pages)[0];
-                  const extract = pageId !== "-1" ? pages[pageId].extract : "";
 
-                  // Then classify with the extract
-                  return fetch("/api/classify", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      title: node.title,
-                      extract: extract
-                    }),
-                  });
-                })
-                .then((res) => {
-                  if (!res.ok) {
-                    throw new Error(`HTTP error! status: ${res.status}`);
-                  }
-                  return res.json();
-                })
-                .then((data: ClassificationResponse) => {
-                  if (data.error) {
-                    console.error('Error in classification:', data.error);
-                    return { labels: [], explanation: '' };
-                  }
+          // Use Promise.all with a map to create all promises at once
+          const classificationPromises = nodesToClassify.map((node) =>
+            // First get Wikipedia data
+            fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&titles=${encodeURIComponent(node.title)}&origin=*`)
+              .then(res => res.json())
+              .then(data => {
+                const pages = data.query.pages;
+                const pageId = Object.keys(pages)[0];
+                const extract = pageId !== "-1" ? pages[pageId].extract : "";
 
-                  return {
-                    labels: data.labels, // Only use AI labels from classification
-                    explanation: data.explanation || ''
-                  };
-                })
-                .catch((error) => {
-                  console.error('Error classifying node:', error);
+                // Then classify with the extract
+                return fetch("/api/classify", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    title: node.title,
+                    extract: extract
+                  }),
+                });
+              })
+              .then((res) => {
+                if (!res.ok) {
+                  throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                return res.json();
+              })
+              .then((data: ClassificationResponse) => {
+                if (data.error) {
+                  console.error('Error in classification:', data.error);
                   return { labels: [], explanation: '' };
-                }),
-            ),
-          ).then((classifications) => {
+                }
+
+                return {
+                  labels: data.labels, // Only use AI labels from classification
+                  explanation: data.explanation || ''
+                };
+              })
+              .catch((error) => {
+                console.error('Error classifying node:', error);
+                return { labels: [], explanation: '' };
+              })
+          );
+
+          Promise.all(classificationPromises).then((classifications) => {
             const newClassifications = new Map(
               nodesToClassify.map((node, i) => [
                 node.slug,
@@ -294,11 +305,17 @@ const EntityGraph = () => {
 
             setNodes(nodesWithLabels);
             setEdges(calculateEdges());
+            dataFetchingInProgressRef.current = false;
           });
         } else {
           console.log("No nodes need classification");
           setEdges(calculateEdges());
+          dataFetchingInProgressRef.current = false;
         }
+      })
+      .catch(error => {
+        console.error("Error fetching data:", error);
+        dataFetchingInProgressRef.current = false;
       });
   }, [dimensions, calculateEdges, getCenter, calculateNodeSize]);
 
@@ -767,7 +784,14 @@ const EntityGraph = () => {
 
   // Add trending topics fetching
   useEffect(() => {
+    const trendingFetchedRef = { current: false };
+    const trendingFetchingInProgressRef = { current: false };
+
     const fetchTrendingTopics = async () => {
+      // Skip if already fetching
+      if (trendingFetchingInProgressRef.current || (isTrendingFetched.current && !trendingFetchedRef.current)) return;
+      trendingFetchingInProgressRef.current = true;
+
       try {
         const response = await fetch('/api/trending');
         const data = await response.json();
@@ -776,18 +800,40 @@ const EntityGraph = () => {
           source: 'trending' as const
         }));
         handleTrendingTopicsChange(topics);
+        trendingFetchedRef.current = true;
+        isTrendingFetched.current = true;
       } catch (error) {
         console.error('Error fetching trending topics:', error);
+      } finally {
+        trendingFetchingInProgressRef.current = false;
       }
     };
 
     fetchTrendingTopics();
-    const interval = setInterval(fetchTrendingTopics, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+
+    // Only set up interval if we're in the browser
+    let interval: NodeJS.Timeout | null = null;
+    if (typeof window !== 'undefined') {
+      interval = setInterval(fetchTrendingTopics, 5 * 60 * 1000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [handleTrendingTopicsChange]);
 
   return (
-    <div ref={containerRef} className="fixed inset-0 z-0">
+    <div
+      ref={containerRef}
+      className="fixed inset-0 z-0"
+      onClick={(e) => {
+        // Only clear if clicking directly on the container (not on a child element)
+        if (e.target === e.currentTarget) {
+          setSelectedLabel(null);
+          setHoveredLabel(null);
+        }
+      }}
+    >
       <svg ref={svgRef} width="100%" height="100%" className="z-10 pt-16">
         <SvgFilters />
         <g className="edges">
@@ -905,12 +951,31 @@ const EntityGraph = () => {
                           className={`flex items-center space-x-2 cursor-pointer 
                                   hover:bg-gray-100/50 dark:hover:bg-gray-800/50
                                   px-3 py-1.5 rounded-full transition-colors whitespace-nowrap
+                                  ${selectedLabel?.name === label.name ? 'bg-gray-100/80 dark:bg-gray-800/80 ring-2 ring-sky-300 dark:ring-sky-700' : ''}
                                   ${label.isHistorical ? 'border border-dashed border-sky-300 dark:border-sky-700' : 'border border-transparent'}`}
                           onMouseEnter={() => setHoveredLabel(label)}
                           onMouseLeave={() => setHoveredLabel(null)}
                           onClick={() => {
-                            if (label.source === 'trending') {
-                              window.open(`https://bsky.app/search?q=${encodeURIComponent(label.name)}`, '_blank');
+                            // If this label is already selected, navigate to Bluesky
+                            if (selectedLabel && selectedLabel.name === label.name) {
+                              if (label.source === 'trending') {
+                                window.open(`https://bsky.app/search?q=${encodeURIComponent(label.name)}`, '_blank');
+                              }
+                              setSelectedLabel(null);
+                            } else {
+                              // First tap - just select the label and show hover state
+                              setSelectedLabel(label);
+                              setHoveredLabel(label);
+                            }
+                          }}
+                          onTouchStart={() => {
+                            // For touch devices, show the hover state
+                            setHoveredLabel(label);
+                          }}
+                          onTouchEnd={(e) => {
+                            // Prevent default to avoid immediate navigation
+                            if (selectedLabel?.name !== label.name) {
+                              e.preventDefault();
                             }
                           }}
                         >

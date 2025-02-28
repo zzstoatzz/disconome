@@ -88,10 +88,9 @@ export async function GET() {
       .sort((a, b) => b.count - a.count);
 
     console.log(`📊 GET /api/track-visit - Returning ${transformedData.length} valid entities`);
-    console.log("Labels summary:", transformedData.map(e => ({
-      title: e.title,
-      labels: e.labels?.map((l: Label) => `${l.name} (${l.source})`)
-    })));
+
+    // just show the names of the labels
+    console.log("Labels summary:", transformedData.map(e => e.labels.map((l: Label) => l.name)));
 
     return new NextResponse(JSON.stringify(transformedData), {
       headers: {
