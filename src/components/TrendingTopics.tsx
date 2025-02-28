@@ -58,7 +58,7 @@ export default function TrendingTopics({ onTrendingTopicsChange, onTopicHover }:
         };
 
         fetchTopics();
-        const interval = setInterval(fetchTopics, 5 * 60 * 1000);
+        const interval = setInterval(fetchTopics, 15 * 60 * 1000);
         return () => clearInterval(interval);
     }, [onTrendingTopicsChange]);
 

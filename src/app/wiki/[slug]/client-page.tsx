@@ -176,7 +176,7 @@ export default function ClientPage({ slug }: { slug: string }) {
       // Only track visits for non-disambiguation pages
       if (wikiData && !wikiData.isDisambiguation && !hasVisited(slug)) {
         try {
-          const response = await fetch("/api/track-visit", {
+          const response = await fetch(`/api/track-visit?_=${Date.now()}`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

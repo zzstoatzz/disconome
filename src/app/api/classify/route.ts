@@ -13,6 +13,57 @@ import {
   CACHE_DURATION,
 } from "@/app/constants";
 
+// Track label usage for monitoring consolidation
+const LABEL_STATS_PATH = "stats/v1/labels.json";
+type LabelStats = Record<string, { count: number, entities: string[] }>;
+
+// Function to update label usage statistics
+async function updateLabelStats(title: string, labels: Label[]) {
+  try {
+    // Get existing label stats
+    let labelStats: LabelStats = {};
+    try {
+      const existingStats = await storage.get(LABEL_STATS_PATH);
+      if (existingStats && typeof existingStats === 'object') {
+        labelStats = existingStats as LabelStats;
+      }
+    } catch (error) {
+      console.log("No existing label stats found, creating new stats");
+    }
+
+    // Update stats for each label
+    for (const label of labels) {
+      if (label.source === 'ai') {
+        const labelName = label.name;
+        if (!labelStats[labelName]) {
+          labelStats[labelName] = { count: 0, entities: [] };
+        }
+
+        labelStats[labelName].count++;
+
+        // Add entity if not already in the list
+        if (!labelStats[labelName].entities.includes(title)) {
+          labelStats[labelName].entities.push(title);
+        }
+      }
+    }
+
+    // Store updated stats
+    await storage.put(LABEL_STATS_PATH, labelStats);
+
+    // Log top labels for monitoring
+    const topLabels = Object.entries(labelStats)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 10);
+
+    console.log("📊 Top AI labels:", topLabels.map(([name, stats]) =>
+      `${name} (${stats.count})`).join(", "));
+
+  } catch (error) {
+    console.error("Error updating label stats:", error);
+  }
+}
+
 const ClassificationSchema = z.object({
   labels: z.array(z.string()).max(MAX_VISIBLE_LABELS),
   explanation: z.string(),
@@ -145,30 +196,57 @@ export async function POST(req: Request) {
 
 ${extract || 'No description available.'}
 
-IMPORTANT: Select EXACTLY 1-3 labels for "${title}". You MUST follow these rules:
+IMPORTANT: Select EXACTLY 1-3 labels for "${title}" that will be displayed in a knowledge graph visualization. You MUST follow these strict rules:
 
-1. You MUST use EXACTLY 1-3 labels total - no more, no less
-2. CONSISTENCY IS CRITICAL - if someone has been labeled as a "Record Producer", use EXACTLY that label for others in that role, not "Producer" or "Music Producer"
-3. Look at the existing labels and trending topics first and reuse them EXACTLY when they fit - no variations allowed
-4. Only create new labels if none of the existing ones truly fit
-5. New labels must be broad enough to be reused for other similar entities
-6. If this entity is currently trending on Bluesky, make sure to capture relevant context about why (e.g. "Television Host" for a TV personality)
-7. CRITICAL: If this entity is related to any currently trending topics, you MUST include those exact trending topics as labels
+1. CONSISTENCY IS THE HIGHEST PRIORITY - use EXACTLY the same labels for similar entities
+2. You MUST select 1-3 labels total - no more, no less
+3. ALWAYS prioritize reusing existing labels from the list below
+4. Create new labels ONLY if absolutely necessary and none of the existing ones fit
+5. Labels should be categorized into these types (in order of priority):
+   - DOMAIN: The primary field/domain (e.g., "Physics", "Computer Science", "Music")
+   - ROLE: The primary role/occupation (e.g., "Physicist", "Entrepreneur", "Musician")
+   - CONTEXT: Additional relevant context (e.g., "Nobel Laureate", "AI Research")
+6. If this entity is related to any currently trending topics, you MUST include those exact trending topics as labels
 
-Here are ALL existing labels and trending topics (REUSE THESE EXACT LABELS when they fit):
-${topNodes.length > 0 ? topNodes.map((n) => `- ${n.title}: ${n.labels.map(l => l.name).join(", ")}`).join("\n") : 'No existing labels yet.'}
+LABEL CONSOLIDATION RULES:
+- Use the EXACT same label for the same concept (e.g., "Physicist" not "Physics Researcher")
+- Use broader categories when possible (e.g., "Musician" instead of "Guitarist" unless specificity is crucial)
+- For people, prioritize their primary role over secondary attributes
+- For concepts/events, prioritize the domain and historical context
+
+Here are ALL existing labels organized by category (YOU MUST REUSE THESE EXACT LABELS when appropriate):
+
+${topNodes.length > 0 ?
+          `EXISTING LABELS (by entity):
+${topNodes.map((n) => `- ${n.title}: ${n.labels.map(l => l.name).join(", ")}`).join("\n")}
+
+CONSOLIDATED LABEL LIST (reuse these exact terms):
+${Array.from(new Set(topNodes.flatMap(n => n.labels.map(l => l.name)))).sort().join(", ")}`
+          : 'No existing labels yet.'}
 
 Currently trending on Bluesky: ${trendingLabels.map((l: Label) => l.name).join(", ")}
 
-Remember: If this entity is related to any of the trending topics listed above, you MUST include those exact trending topics as labels.`
+Your task is to maintain a consistent, well-organized knowledge graph by selecting the most appropriate labels for "${title}" that align with the existing labeling patterns. Prioritize consistency over creativity.`
     });
 
     // Transform AI-generated labels to include source
     const aiLabels = result.object.labels.map(label => {
-      // Check if this label matches a trending topic
-      const matchingTrending = trendingLabels.find((t: Label) => t.name.toLowerCase() === label.toLowerCase());
+      // Normalize label text - trim whitespace and ensure consistent capitalization
+      const normalizedLabel = label.trim().replace(/\s+/g, ' ');
+
+      // Check if this label matches a trending topic (case-insensitive)
+      const matchingTrending = trendingLabels.find((t: Label) =>
+        t.name.toLowerCase() === normalizedLabel.toLowerCase());
+
+      // Check if this label matches an existing AI label (case-insensitive)
+      const existingLabel = Array.from(new Set(
+        topNodes.flatMap(n => n.labels.map(l => l.name))
+      )).find(name => name.toLowerCase() === normalizedLabel.toLowerCase());
+
       return {
-        name: matchingTrending ? matchingTrending.name : label,
+        // Use exact match from existing labels if available, otherwise use the normalized label
+        name: matchingTrending ? matchingTrending.name :
+          existingLabel || normalizedLabel,
         source: matchingTrending ? 'trending' as const : 'ai' as const
       };
     });
@@ -186,6 +264,9 @@ Remember: If this entity is related to any of the trending topics listed above, 
 
     // Cache the result
     classifications.set(slug, classification);
+
+    // Update label usage statistics
+    await updateLabelStats(title, aiLabels);
 
     // Return both AI and trending labels separately
     return NextResponse.json({

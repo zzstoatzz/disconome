@@ -8,6 +8,20 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // Namespace prefix for all blob keys
 const NAMESPACE = process.env.BLOB_NAMESPACE || "dev";
 
+// Check if Vercel Blob is properly configured
+const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+const isBlobConfigured = !!BLOB_READ_WRITE_TOKEN;
+
+console.log(`🔧 Storage - Vercel Blob configuration:`, {
+    namespace: NAMESPACE,
+    isConfigured: isBlobConfigured,
+    hasToken: !!BLOB_READ_WRITE_TOKEN,
+});
+
+if (!isBlobConfigured) {
+    console.warn(`⚠️ Storage - WARNING: Vercel Blob is not properly configured. BLOB_READ_WRITE_TOKEN is missing.`);
+}
+
 // Utility function to build the full namespaced key
 function withNamespace(path: string): string {
     return NAMESPACE.replace(/\/$/, "") + "/" + path.replace(/^\/*/, "");
@@ -25,24 +39,54 @@ export interface StorageInterface {
 class BlobStorage implements StorageInterface {
     async get<T extends JsonValue>(path: string): Promise<T | null> {
         const key = withNamespace(path);
-        console.log(`📥 Fetching blob: ${key}`);
+        console.log(`📥 Storage - Fetching blob: ${key}`);
 
-        const { blobs } = await list({ prefix: key });
-        if (blobs.length === 0) {
-            console.log(`❌ Blob not found: ${key}`);
-            return null;
+        // Check cache first
+        const entry = cache.get(key);
+        if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
+            console.log(`🔄 Storage - Cache hit for ${key}`);
+            return entry.data as T;
         }
 
         try {
+            console.log(`📥 Storage - Listing blobs with prefix: ${key}`);
+            const { blobs } = await list({ prefix: key });
+            console.log(`📥 Storage - Found ${blobs.length} blobs matching prefix: ${key}`);
+
+            if (blobs.length === 0) {
+                console.log(`❌ Storage - Blob not found: ${key}`);
+                return null;
+            }
+
             // Sort blobs by uploadedAt to get the latest version
             const latestBlob = blobs
                 .sort((a, b) => (b.uploadedAt?.getTime() || 0) - (a.uploadedAt?.getTime() || 0))[0];
 
+            console.log(`📥 Storage - Using latest blob: ${latestBlob.pathname} (uploaded: ${latestBlob.uploadedAt})`);
+            console.log(`📥 Storage - Fetching content from URL: ${latestBlob.url}`);
+
             const response = await fetch(latestBlob.url);
+            if (!response.ok) {
+                console.error(`❌ Storage - HTTP error fetching blob: ${key}, status: ${response.status}`);
+                return null;
+            }
+
             const data = await response.json();
+            console.log(`📥 Storage - Successfully fetched blob: ${key}`);
+
+            // Check if this is a tombstone (deleted) object
+            if (data && typeof data === 'object' && data.__deleted === true) {
+                console.log(`🗑️ Storage - Blob marked as deleted: ${key}`);
+                return null;
+            }
+
+            // Update cache
+            cache.set(key, { data, timestamp: Date.now() });
+            console.log(`💾 Storage - Cached blob: ${key}`);
+
             return data as T;
         } catch (error) {
-            console.error(`❌ Error fetching blob: ${key}`, error);
+            console.error(`❌ Storage - Error fetching blob: ${key}`, error);
             return null;
         }
     }
@@ -53,14 +97,14 @@ class BlobStorage implements StorageInterface {
         // Check cache first
         const entry = cache.get(key);
         if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
-            console.log(`🔄 Cache hit for ${key}`);
+            console.log(`🔄 Storage - Cache hit for ${key}`);
             return { data: entry.data as T, version: entry.version || "0" };
         }
 
-        console.log(`📥 Fetching blob: ${key}`);
+        console.log(`📥 Storage - Fetching blob: ${key}`);
         const { blobs } = await list({ prefix: key });
         if (blobs.length === 0) {
-            console.log(`❌ Blob not found: ${key}`);
+            console.log(`❌ Storage - Blob not found: ${key}`);
             return { data: null, version: "0" };
         }
 
@@ -69,20 +113,26 @@ class BlobStorage implements StorageInterface {
             const data = await response.json();
             const version = blobs[0].uploadedAt?.toISOString() || "0";
 
+            // Check if this is a tombstone (deleted) object
+            if (data && typeof data === 'object' && data.__deleted === true) {
+                console.log(`🗑️ Storage - Blob marked as deleted: ${key}`);
+                return { data: null, version };
+            }
+
             // Update cache with version
             cache.set(key, { data, timestamp: Date.now(), version });
-            console.log(`💾 Cached blob: ${key} with version ${version}`);
+            console.log(`💾 Storage - Cached blob: ${key} with version ${version}`);
 
             return { data: data as T, version };
         } catch (error) {
-            console.error(`❌ Error fetching blob: ${key}`, error);
+            console.error(`❌ Storage - Error fetching blob: ${key}`, error);
             return { data: null, version: "0" };
         }
     }
 
     async put<T extends JsonValue>(path: string, data: T): Promise<void> {
         const key = withNamespace(path);
-        console.log(`📤 Putting blob: ${key}`);
+        console.log(`📤 Storage - Putting blob: ${key}`);
 
         try {
             // Get existing data first
@@ -99,16 +149,19 @@ class BlobStorage implements StorageInterface {
                 cacheControlMaxAge: 0, // Disable caching
                 contentType: 'application/json'
             });
-            console.log(`✅ Successfully put blob: ${key}`);
+            console.log(`✅ Storage - Successfully put blob: ${key}`);
+
+            // Update cache
+            cache.set(key, { data: mergedData, timestamp: Date.now() });
         } catch (error) {
-            console.error(`❌ Error putting blob: ${key}`, error);
+            console.error(`❌ Storage - Error putting blob: ${key}`, error);
             throw error;
         }
     }
 
     async putWithVersion<T extends JsonValue>(path: string, data: T, expectedVersion: string): Promise<boolean> {
         const key = withNamespace(path);
-        console.log(`📤 Putting blob: ${key} with expected version ${expectedVersion}`);
+        console.log(`📤 Storage - Putting blob: ${key} with expected version ${expectedVersion}`);
 
         try {
             // Get current version
@@ -116,7 +169,7 @@ class BlobStorage implements StorageInterface {
 
             // Version mismatch - someone else updated the file
             if (currentVersion !== expectedVersion) {
-                console.log(`⚠️ Version mismatch for ${key}: expected ${expectedVersion}, got ${currentVersion}`);
+                console.log(`⚠️ Storage - Version mismatch for ${key}: expected ${expectedVersion}, got ${currentVersion}`);
                 return false;
             }
 
@@ -129,39 +182,96 @@ class BlobStorage implements StorageInterface {
             // Update cache with new version (use current timestamp as version)
             const newVersion = new Date().toISOString();
             cache.set(key, { data, timestamp: Date.now(), version: newVersion });
-            console.log(`💾 Updated blob: ${key} with new version ${newVersion}`);
+            console.log(`💾 Storage - Updated blob: ${key} with new version ${newVersion}`);
 
             return true;
         } catch (error) {
-            console.error(`❌ Error putting blob: ${key}`, error);
+            console.error(`❌ Storage - Error putting blob: ${key}`, error);
             throw error;
         }
     }
 
     async list(prefix: string = ""): Promise<string[]> {
         const key = withNamespace(prefix);
-        console.log(`📋 Listing blobs with prefix: ${key}`);
+        console.log(`📋 Storage - Listing blobs with prefix: ${key}`);
 
         try {
             const { blobs } = await list({ prefix: key });
+            console.log(`📋 Storage - Found ${blobs.length} blobs with prefix: ${key}`);
+
+            if (blobs.length === 0) {
+                console.log(`📋 Storage - No blobs found with prefix: ${key}`);
+                return [];
+            }
+
+            // Filter out deleted files
+            const filteredBlobs = [];
+            console.log(`📋 Storage - Checking ${blobs.length} blobs for deleted status`);
+
+            for (const blob of blobs) {
+                try {
+                    console.log(`📋 Storage - Checking blob: ${blob.pathname}`);
+                    const response = await fetch(blob.url);
+                    if (!response.ok) {
+                        console.error(`❌ Storage - HTTP error fetching blob: ${blob.pathname}, status: ${response.status}`);
+                        continue;
+                    }
+
+                    const data = await response.json();
+
+                    // Skip files marked as deleted
+                    if (data && typeof data === 'object' && data.__deleted === true) {
+                        console.log(`🗑️ Storage - Skipping deleted blob: ${blob.pathname}`);
+                        continue;
+                    }
+
+                    filteredBlobs.push(blob);
+                    console.log(`📋 Storage - Added valid blob: ${blob.pathname}`);
+                } catch (error) {
+                    // If we can't read the file, include it anyway
+                    console.error(`⚠️ Storage - Error reading blob: ${blob.pathname}, including it anyway`, error);
+                    filteredBlobs.push(blob);
+                }
+            }
+
+            console.log(`📋 Storage - Filtered to ${filteredBlobs.length} non-deleted blobs`);
+
             // Strip namespace from results
-            return blobs.map(blob => blob.pathname.replace(new RegExp(`^${NAMESPACE}/`), ""));
+            const results = filteredBlobs.map(blob => blob.pathname.replace(new RegExp(`^${NAMESPACE}/`), ""));
+            console.log(`📋 Storage - Returning ${results.length} paths after stripping namespace`);
+
+            return results;
         } catch (error) {
-            console.error(`❌ Error listing blobs: ${key}`, error);
+            console.error(`❌ Storage - Error listing blobs: ${key}`, error);
             return [];
         }
     }
 
     async delete(path: string): Promise<void> {
         const key = withNamespace(path);
-        console.log(`🗑️ Deleting blob: ${key}`);
+        console.log(`🗑️ Storage - Deleting blob: ${key}`);
 
-        // Note: Vercel Blob doesn't have a direct delete method
-        // We might want to implement this differently
-        console.warn('Delete not implemented for BlobStorage');
+        try {
+            // Since Vercel Blob doesn't have a direct delete method in the SDK,
+            // we'll mark the file as deleted by overwriting it with a tombstone object
+            await put(key, JSON.stringify({
+                __deleted: true,
+                __deletedAt: new Date().toISOString(),
+                __originalPath: path
+            }), {
+                access: 'public',
+                addRandomSuffix: false,
+                contentType: 'application/json'
+            });
 
-        // Still remove from cache
-        cache.delete(key);
+            console.log(`✅ Storage - Successfully marked blob as deleted: ${key}`);
+
+            // Remove from cache
+            cache.delete(key);
+        } catch (error) {
+            console.error(`❌ Storage - Error marking blob as deleted: ${key}`, error);
+            throw error;
+        }
     }
 }
 
@@ -169,4 +279,4 @@ class BlobStorage implements StorageInterface {
 export const storage = new BlobStorage();
 
 // Export types for use elsewhere
-export type { CacheEntry, JsonValue }; 
+export type { CacheEntry, JsonValue };
