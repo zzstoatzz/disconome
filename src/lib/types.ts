@@ -2,6 +2,7 @@ export type Label = {
     name: string;
     source: 'trending' | 'ai';
     timestamp?: number;
+    isHistorical?: boolean;
 };
 
 export type Classification = {

@@ -13,7 +13,6 @@ import {
   MAX_VISIBLE_NODES,
   IGNORED_LABELS,
   IGNORED_PAGES,
-  MIN_TRENDING_LABELS
 } from "@/app/constants";
 import { Label } from "@/lib/types";
 import { ClassificationResponse } from "@/lib/api-types";
@@ -59,6 +58,9 @@ const EntityGraph = () => {
 
   // Add a new theme state
   const [isDarkTheme, setIsDarkTheme] = useState(false);
+
+  // Add a ref for the scrollable container
+  const labelsContainerRef = useRef<HTMLDivElement>(null);
 
   // Track when labels are loaded via classification
   useEffect(() => {
@@ -329,14 +331,18 @@ const EntityGraph = () => {
       count: number;
       nodeCount: number;
       source: 'trending' | 'ai';
+      hasNodes: boolean; // Track if label has associated nodes
+      isHistorical?: boolean; // Flag for historical trending topics
     }>();
 
     // First add trending topics
     trendingTopics.forEach(topic => {
       labelCounts.set(topic.name, {
         count: 1,
-        nodeCount: 1,
-        source: 'trending'
+        nodeCount: 0, // Start with 0 node count for trending topics
+        source: 'trending',
+        hasNodes: false, // Will be updated when processing nodes
+        isHistorical: false // Current trending topics are not historical
       });
     });
 
@@ -352,38 +358,159 @@ const EntityGraph = () => {
               labelCounts.set(label.name, {
                 count: current.count + (node.count || 0),
                 nodeCount: current.nodeCount + 1,
-                source: current.source === 'trending' ? 'trending' : label.source
+                source: current.source === 'trending' ? 'trending' : label.source,
+                hasNodes: true, // This label has associated nodes
+                // If it's a trending topic with nodes but not in current trending topics,
+                // mark it as historical
+                isHistorical: current.source === 'trending' &&
+                  !trendingTopics.some(t => t.name === label.name)
               });
             } else {
               labelCounts.set(label.name, {
                 count: node.count || 0,
                 nodeCount: 1,
-                source: label.source
+                source: label.source,
+                hasNodes: true,
+                isHistorical: false
               });
             }
           });
       });
 
-    // Split labels into trending and AI
+    // Get all labels that meet our criteria
     const allLabels = Array.from(labelCounts.entries())
-      .filter(([, stats]) => stats.source === 'trending' || stats.nodeCount >= 2)
-      .sort((a, b) => b[1].count - a[1].count)
-      .map(([name, stats]) => ({
-        name,
-        source: stats.source
-      }));
+      .filter(([, stats]) => {
+        // Keep trending topics that are current
+        if (stats.source === 'trending' && !stats.isHistorical) return true;
+        // Keep historical trending topics only if they have nodes
+        if (stats.source === 'trending' && stats.isHistorical) return stats.hasNodes;
+        // Keep AI topics with at least 2 nodes
+        return stats.nodeCount >= 2;
+      })
+      .sort((a, b) => b[1].count - a[1].count);
 
-    const trendingLabels = allLabels.filter(l => l.source === 'trending').slice(0, MAX_VISIBLE_LABELS - MIN_TRENDING_LABELS);
-    const aiLabels = allLabels.filter(l => l.source === 'ai').slice(0, MAX_VISIBLE_LABELS - MIN_TRENDING_LABELS);
+    // Distribute labels by category with priority and limits
+    const distributeLabelsByCategory = (
+      allLabels: Array<[string, {
+        count: number;
+        nodeCount: number;
+        source: 'trending' | 'ai';
+        hasNodes: boolean;
+        isHistorical?: boolean;
+      }]>
+    ) => {
+      // Filter labels by category
+      const currentTrendingCandidates = allLabels
+        .filter(([, stats]) => stats.source === 'trending' && !stats.isHistorical);
 
-    // Combine trending and AI labels
-    return [...trendingLabels, ...aiLabels];
+      const historicalTrendingCandidates = allLabels
+        .filter(([, stats]) => stats.source === 'trending' && stats.isHistorical && stats.hasNodes);
+
+      const aiCandidates = allLabels
+        .filter(([, stats]) => stats.source === 'ai');
+
+      // Simple approach: take all labels up to MAX_VISIBLE_LABELS
+
+      // Take all current trending labels first (up to a reasonable limit)
+      const maxCurrentTrending = Math.min(currentTrendingCandidates.length, 5);
+
+      // Take all historical trending labels with nodes
+      const maxHistoricalTrending = historicalTrendingCandidates.length;
+
+      // Calculate how many AI labels we can include
+      const remainingForAi = MAX_VISIBLE_LABELS - maxCurrentTrending - maxHistoricalTrending;
+      const maxAiLabels = Math.max(0, remainingForAi);
+
+      // If we don't have enough labels total, adjust the AI count
+      const finalAiCount = Math.min(aiCandidates.length, maxAiLabels);
+
+      // Create the final label arrays
+      const currentTrendingLabels = currentTrendingCandidates
+        .slice(0, maxCurrentTrending)
+        .map(([name]) => ({
+          name,
+          source: 'trending' as const,
+          isHistorical: false
+        }));
+
+      const historicalTrendingLabels = historicalTrendingCandidates
+        .slice(0, maxHistoricalTrending)
+        .map(([name]) => ({
+          name,
+          source: 'trending' as const,
+          isHistorical: true
+        }));
+
+      let aiLabels = aiCandidates
+        .slice(0, finalAiCount)
+        .map(([name]) => ({
+          name,
+          source: 'ai' as const,
+          isHistorical: false
+        }));
+
+      // Check if we need to add more labels to reach MAX_VISIBLE_LABELS
+      let allLabelsArray = [...currentTrendingLabels, ...historicalTrendingLabels, ...aiLabels];
+
+      // If we have fewer than MAX_VISIBLE_LABELS, add more AI labels if available
+      if (allLabelsArray.length < MAX_VISIBLE_LABELS && aiCandidates.length > finalAiCount) {
+        const additionalAiNeeded = MAX_VISIBLE_LABELS - allLabelsArray.length;
+        const additionalAiAvailable = aiCandidates.length - finalAiCount;
+        const additionalAiToAdd = Math.min(additionalAiNeeded, additionalAiAvailable);
+
+        const moreAiLabels = aiCandidates
+          .slice(finalAiCount, finalAiCount + additionalAiToAdd)
+          .map(([name]) => ({
+            name,
+            source: 'ai' as const,
+            isHistorical: false
+          }));
+
+        aiLabels = [...aiLabels, ...moreAiLabels];
+        allLabelsArray = [...currentTrendingLabels, ...historicalTrendingLabels, ...aiLabels];
+      }
+
+      // Ensure we don't exceed MAX_VISIBLE_LABELS
+      allLabelsArray = allLabelsArray.slice(0, MAX_VISIBLE_LABELS);
+
+      // Debug logging for label distribution
+      console.log("Label distribution:", {
+        maxVisible: MAX_VISIBLE_LABELS,
+        currentTrending: currentTrendingLabels.length,
+        historicalTrending: historicalTrendingLabels.length,
+        ai: allLabelsArray.length - (currentTrendingLabels.length + historicalTrendingLabels.length),
+        totalShown: allLabelsArray.length
+      });
+
+      // Return the categories separately for the caller to combine as needed
+      return {
+        currentTrendingLabels: allLabelsArray.filter(l => l.source === 'trending' && !l.isHistorical),
+        historicalTrendingLabels: allLabelsArray.filter(l => l.source === 'trending' && l.isHistorical),
+        aiLabels: allLabelsArray.filter(l => l.source === 'ai')
+      };
+    };
+
+    // Use our new distribution function
+    const { currentTrendingLabels, historicalTrendingLabels, aiLabels } =
+      distributeLabelsByCategory(allLabels);
+
+    // Combine all categories in the desired order
+    return [...currentTrendingLabels, ...historicalTrendingLabels, ...aiLabels];
   }, [nodes, trendingTopics]);
 
   // Only log unique labels when they change and exist
   useEffect(() => {
     if (uniqueLabels.length > 0) {
-      console.log("🏷️ Categories:", uniqueLabels.length);
+      const trendingCount = uniqueLabels.filter(label => label.source === 'trending' && !label.isHistorical).length;
+      const historicalCount = uniqueLabels.filter(label => label.source === 'trending' && label.isHistorical).length;
+      const aiCount = uniqueLabels.filter(label => label.source === 'ai').length;
+
+      console.log("🏷️ Categories:", {
+        total: uniqueLabels.length,
+        trending: trendingCount,
+        historical: historicalCount,
+        ai: aiCount
+      });
     }
   }, [uniqueLabels]);
 
@@ -567,6 +694,50 @@ const EntityGraph = () => {
     };
   }, []);
 
+  // Add custom scrollbar styling
+  useEffect(() => {
+    const scrollbarStyle = document.createElement('style');
+    scrollbarStyle.textContent = `
+      /* Custom scrollbar styling for Chrome, Safari and Opera */
+      .labels-container::-webkit-scrollbar {
+        height: 2px;
+        width: 2px;
+      }
+      
+      .labels-container::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      
+      .labels-container::-webkit-scrollbar-thumb {
+        background-color: rgba(0, 0, 0, 0.15);
+        border-radius: 10px;
+      }
+
+      .labels-container::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(0, 0, 0, 0.25);
+      }
+      
+      /* Custom scrollbar for Firefox */
+      .labels-container {
+        scrollbar-width: none;
+      }
+      
+      /* Dark mode adjustments */
+      .dark .labels-container::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.15);
+      }
+
+      .dark .labels-container::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(255, 255, 255, 0.25);
+      }
+    `;
+    document.head.appendChild(scrollbarStyle);
+
+    return () => {
+      document.head.removeChild(scrollbarStyle);
+    };
+  }, []);
+
   // Add handler for trending topics changes
   const handleTrendingTopicsChange = useCallback((topics: Label[]) => {
     setTrendingTopics(topics);
@@ -582,7 +753,7 @@ const EntityGraph = () => {
         const existingNonTrendingLabels = (node.labels || []).filter(l => l.source === 'ai');
         return {
           ...node,
-          labels: [...existingNonTrendingLabels, { ...matchingTopic, source: 'trending' }]
+          labels: [...existingNonTrendingLabels, { ...matchingTopic, source: 'trending', isHistorical: false }]
         };
       }
 
@@ -716,48 +887,62 @@ const EntityGraph = () => {
           {uniqueLabels.length > 0 && (
             <div className="p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transition-colors duration-200">
               <div className="max-w-screen-2xl mx-auto">
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  {uniqueLabels.map((label) => {
-                    const labelKey = `label-${label.name}-${label.source}`;
-                    return (
-                      <div
-                        key={labelKey}
-                        className={`flex items-center space-x-2 cursor-pointer 
-                                hover:bg-gray-100/50 dark:hover:bg-gray-800/50
-                                px-2 py-1 rounded-full transition-colors`}
-                        onMouseEnter={() => setHoveredLabel(label)}
-                        onMouseLeave={() => setHoveredLabel(null)}
-                        onClick={() => {
-                          if (label.source === 'trending') {
-                            window.open(`https://bsky.app/search?q=${encodeURIComponent(label.name)}`, '_blank');
-                          }
-                        }}
-                      >
-                        {label.source === 'trending' ? (
-                          <svg
-                            className="w-2.5 h-2.5 text-sky-500"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M23 6l-9.5 9.5-5-5L1 18" />
-                            <path d="M17 6h6v6" />
-                          </svg>
-                        ) : (
-                          <div
-                            className="w-2 h-2 rounded-full"
-                            style={{ backgroundColor: categoryColors.get(label.name) }}
-                          />
-                        )}
-                        <span className="text-xs text-gray-800 dark:text-white/90 font-medium">
-                          {label.name}
-                        </span>
-                      </div>
-                    );
-                  })}
+                <div className="flex flex-col space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 font-medium"></div>
+                    <div className="text-xs text-gray-400 dark:text-gray-500">
+                      {/* Removed scroll indicator text for cleaner UI */}
+                    </div>
+                  </div>
+                  <div
+                    ref={labelsContainerRef}
+                    className="labels-container flex flex-nowrap space-x-2 overflow-x-auto pb-2 max-w-full">
+                    {uniqueLabels.map((label) => {
+                      const labelKey = `label-${label.name}-${label.source}`;
+                      return (
+                        <div
+                          key={labelKey}
+                          className={`flex items-center space-x-2 cursor-pointer 
+                                  hover:bg-gray-100/50 dark:hover:bg-gray-800/50
+                                  px-3 py-1.5 rounded-full transition-colors whitespace-nowrap
+                                  ${label.isHistorical ? 'border border-dashed border-sky-300 dark:border-sky-700' : 'border border-transparent'}`}
+                          onMouseEnter={() => setHoveredLabel(label)}
+                          onMouseLeave={() => setHoveredLabel(null)}
+                          onClick={() => {
+                            if (label.source === 'trending') {
+                              window.open(`https://bsky.app/search?q=${encodeURIComponent(label.name)}`, '_blank');
+                            }
+                          }}
+                        >
+                          {label.source === 'trending' ? (
+                            <svg
+                              className={`w-2.5 h-2.5 ${label.isHistorical ? 'text-sky-300 dark:text-sky-700' : 'text-sky-500'}`}
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M23 6l-9.5 9.5-5-5L1 18" />
+                              <path d="M17 6h6v6" />
+                            </svg>
+                          ) : (
+                            <div
+                              className="w-2 h-2 rounded-full"
+                              style={{ backgroundColor: categoryColors.get(label.name) }}
+                            />
+                          )}
+                          <span className={`text-xs ${label.isHistorical
+                            ? 'text-gray-500 dark:text-gray-400 italic'
+                            : 'text-gray-800 dark:text-white/90'
+                            } font-medium`}>
+                            {label.name}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             </div>
