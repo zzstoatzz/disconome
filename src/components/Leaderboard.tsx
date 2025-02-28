@@ -17,7 +17,7 @@ export function Leaderboard() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await fetch('/api/track-visit');
+        const response = await fetch(`/api/track-visit?_=${Date.now()}`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -33,8 +33,8 @@ export function Leaderboard() {
     };
 
     fetchStats();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchStats, 30000);
+    // Refresh every 5 minutes instead of 30 seconds
+    const interval = setInterval(fetchStats, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 

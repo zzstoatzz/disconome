@@ -6,7 +6,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { SearchSuggestions, Suggestion } from "@/components/SearchSuggestions";
 import { useSearch } from "@/hooks/useSearch";
 import { Leaderboard } from "@/components/Leaderboard";
-import EntityGraph from "@/components/EntityGraph";
+import EntityGraph from "@/components/entity-graph";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Create a wrapper component for the search params functionality
