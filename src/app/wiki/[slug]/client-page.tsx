@@ -3,6 +3,7 @@
 import { experimental_useObject as useObject } from "ai/react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { z } from "zod";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { slugify } from "@/lib/utils";
@@ -120,6 +121,9 @@ export default function ClientPage({ slug }: { slug: string }) {
   const [isWikiLoading, setIsWikiLoading] = useState(true);
   const [visitError, setVisitError] = useState<string | null>(null);
   const [labels, setLabels] = useState<Array<{ name: string; source: string }>>([]);
+  const searchParams = useSearchParams();
+  const isZenMode = searchParams.get("zen") === "true";
+  const homeLink = isZenMode ? "/?zen=true" : "/";
 
   const {
     object: eventData,
@@ -221,7 +225,7 @@ export default function ClientPage({ slug }: { slug: string }) {
       <div className="container mx-auto px-4 py-8 text-gray-900 dark:text-white">
         <nav className="mb-8 flex items-center justify-between">
           <Link
-            href="/"
+            href={homeLink}
             className="flex items-center text-lg text-gray-900 dark:text-white hover:text-blue-500 transition-colors"
           >
             <span className="mr-2">←</span>
@@ -241,7 +245,7 @@ export default function ClientPage({ slug }: { slug: string }) {
       <div className="container mx-auto px-4 py-8 text-gray-900 dark:text-white">
         <nav className="mb-8 flex items-center justify-between">
           <Link
-            href="/"
+            href={homeLink}
             className="flex items-center text-lg text-gray-900 dark:text-white hover:text-blue-500 transition-colors"
           >
             <span className="mr-2">←</span>
@@ -258,7 +262,7 @@ export default function ClientPage({ slug }: { slug: string }) {
       <div className="container mx-auto px-4 py-8 text-gray-900 dark:text-white">
         <nav className="mb-8 flex items-center justify-between">
           <Link
-            href="/"
+            href={homeLink}
             className="flex items-center text-lg text-gray-900 dark:text-white hover:text-blue-500 transition-colors"
           >
             <span className="mr-2">←</span>
@@ -270,7 +274,7 @@ export default function ClientPage({ slug }: { slug: string }) {
           {wikiData.disambiguationOptions?.map((option, index) => (
             <Link
               key={index}
-              href={`/wiki/${encodeURIComponent(option.title.toLowerCase().replace(/ /g, '-'))}`}
+              href={`/wiki/${encodeURIComponent(option.title.toLowerCase().replace(/ /g, '-'))}${isZenMode ? '?zen=true' : ''}`}
               className="block p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               <h3 className="text-xl font-mono mb-2">{option.title}</h3>
@@ -287,7 +291,7 @@ export default function ClientPage({ slug }: { slug: string }) {
       <div className="container mx-auto px-4 py-8">
         <nav className="mb-8 flex items-center justify-between sticky top-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 py-4">
           <Link
-            href="/"
+            href={homeLink}
             className="flex items-center text-lg text-gray-900 dark:text-white hover:text-blue-500 transition-colors"
           >
             <span className="mr-2">←</span>
