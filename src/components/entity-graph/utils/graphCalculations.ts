@@ -98,7 +98,7 @@ export const distributeNodes = (
     };
 
     // Ensure radius is valid - use a fixed minimum radius
-    const validRadius = Math.max(isNaN(radius) || radius <= 0 ? 350 : radius, 350);
+    const validRadius = Math.max(isNaN(radius) || radius <= 0 ? 450 : radius, 450);
 
     // Calculate angle step based on number of nodes
     const angleStep = (2 * Math.PI) / nodes.length;

@@ -202,7 +202,7 @@ const EntityGraph: React.FC = () => {
                 setTimeout(() => {
                     // Distribute nodes in a circle
                     const center = { x: 500, y: 500 }; // Center of SVG viewBox
-                    const radius = 350; // Radius for node distribution
+                    const radius = 700; // Radius for node distribution
 
                     // Calculate new positions
                     const redistributedNodes = distributeNodes(
@@ -268,7 +268,7 @@ const EntityGraph: React.FC = () => {
                 ref={svgRef}
                 style={{
                     position: 'absolute',
-                    top: 0,
+                    top: '60px', // Add top margin to move the entire SVG down
                     left: 0,
                     right: 0,
                     bottom: 0,

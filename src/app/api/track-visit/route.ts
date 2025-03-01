@@ -17,93 +17,10 @@ export async function GET() {
     console.log("🔍 GET /api/track-visit - Starting request");
     const stats = await storage.get<StatsMap>(STATS_PATH);
 
-    // If no stats found, create some sample data
+    // If no stats found, return empty array
     if (!stats || Object.keys(stats).length === 0) {
       console.log("📊 GET /api/track-visit - No stats found at path:", STATS_PATH);
-      console.log("📊 GET /api/track-visit - Creating sample data");
-
-      // Sample entities
-      const sampleEntities = [
-        { title: "Artificial Intelligence", views: 100 },
-        { title: "Machine Learning", views: 85 },
-        { title: "Neural Networks", views: 70 },
-        { title: "Deep Learning", views: 65 },
-        { title: "Natural Language Processing", views: 60 },
-        { title: "Computer Vision", views: 55 },
-        { title: "Robotics", views: 50 },
-        { title: "Data Science", views: 45 },
-        { title: "Quantum Computing", views: 40 },
-        { title: "Blockchain", views: 35 }
-      ];
-
-      // Create sample stats
-      const sampleStats: StatsMap = {};
-      for (const entity of sampleEntities) {
-        const slug = slugify(entity.title);
-        sampleStats[slug] = {
-          title: entity.title,
-          views: entity.views,
-          lastVisited: Date.now() - Math.floor(Math.random() * 1000000)
-        };
-      }
-
-      // Create sample classifications
-      for (const entity of sampleEntities) {
-        const slug = slugify(entity.title);
-        const sampleLabels: Label[] = [
-          { name: "Technology", source: "ai" },
-          { name: "Computing", source: "ai" }
-        ];
-
-        // Add specific labels based on title
-        if (entity.title.includes("Intelligence") || entity.title.includes("Learning") ||
-          entity.title.includes("Neural") || entity.title.includes("Language")) {
-          sampleLabels.push({ name: "Artificial Intelligence", source: "ai" });
-        }
-
-        if (entity.title.includes("Data") || entity.title.includes("Science")) {
-          sampleLabels.push({ name: "Data Science", source: "ai" });
-        }
-
-        if (entity.title.includes("Quantum") || entity.title.includes("Blockchain")) {
-          sampleLabels.push({ name: "Emerging Technology", source: "ai" });
-        }
-
-        // Save classification
-        await storage.put(`${CLASSIFICATIONS_PATH}${slug}.json`, {
-          labels: sampleLabels,
-          explanation: `This is a sample classification for ${entity.title}`,
-          timestamp: Date.now()
-        });
-
-        console.log(`📊 GET /api/track-visit - Created sample classification for ${entity.title}`);
-      }
-
-      // Save sample stats
-      await storage.put(STATS_PATH, sampleStats);
-      console.log(`📊 GET /api/track-visit - Saved sample stats with ${Object.keys(sampleStats).length} entities`);
-
-      // Return sample data in the expected format
-      const sampleData = Object.entries(sampleStats).map(([slug, entity]) => {
-        const classification = {
-          labels: [
-            { name: "Technology", source: "ai" },
-            { name: "Computing", source: "ai" }
-          ],
-          explanation: `This is a sample classification for ${entity.title}`
-        };
-
-        return {
-          slug,
-          title: entity.title,
-          count: entity.views,
-          lastVisited: entity.lastVisited,
-          labels: classification.labels,
-          explanation: classification.explanation
-        };
-      });
-
-      return new NextResponse(JSON.stringify(sampleData), {
+      return new NextResponse(JSON.stringify([]), {
         headers: {
           'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
           'Pragma': 'no-cache',
@@ -161,6 +78,24 @@ export async function GET() {
 
     console.log(`📊 GET /api/track-visit - Loaded ${classifications.size} valid classifications`);
     console.log(`📊 GET /api/track-visit - Found ${deletedEntities.size} deleted entities`);
+
+    // Find entities without classifications and trigger classification
+    const entitiesWithoutClassification = Object.entries(stats)
+      .filter(([slug]) => !classifications.has(slug) && !deletedEntities.has(slug))
+      .map(([slug, entity]) => ({ slug, title: entity.title }));
+    
+    if (entitiesWithoutClassification.length > 0) {
+      console.log(`🔄 GET /api/track-visit - Found ${entitiesWithoutClassification.length} entities without classification`);
+      
+      // Trigger classification for each entity (non-blocking)
+      entitiesWithoutClassification.forEach(({ title }) => {
+        fetch("http://localhost:3000/api/track-visit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        }).catch(err => console.error(`❌ Error triggering classification for ${title}:`, err));
+      });
+    }
 
     // Filter out entities that are in the deletedEntities set
     const transformedData = Object.entries(stats)
@@ -337,13 +272,20 @@ export async function POST(req: Request) {
         console.error(`❌ POST /api/track-visit - Error during classification:`, error);
       }
     } else {
-      // Check if this entity needs re-classification (was previously removed)
+      // Check if this entity needs classification
       try {
         const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
         const existingClassification = await storage.get(classificationPath);
+        const needsClassification = existingClassification === null || 
+                                   (typeof existingClassification === 'object' && 
+                                    ('needsReclassification' in existingClassification || 
+                                     !isClassification(existingClassification) || 
+                                     (isClassification(existingClassification) && 
+                                      (!existingClassification.labels || 
+                                       existingClassification.labels.length === 0))));
         
-        if (existingClassification && typeof existingClassification === 'object' && 'needsReclassification' in existingClassification) {
-          console.log(`🔄 POST /api/track-visit - Entity needs re-classification: ${title}`);
+        if (needsClassification) {
+          console.log(`🔄 POST /api/track-visit - Entity needs classification: ${title}`);
           
           // Fetch Wikipedia extract for this entity
           try {
@@ -376,7 +318,7 @@ export async function POST(req: Request) {
                 
                 if (classifyResponse.ok) {
                   const classifyData = await classifyResponse.json();
-                  console.log(`✅ POST /api/track-visit - Re-classification successful:`, {
+                  console.log(`✅ POST /api/track-visit - Classification successful:`, {
                     labels: classifyData.labels?.map((l: Label) => `${l.name} (${l.source})`),
                     explanation: classifyData.explanation?.slice(0, 50) + "...",
                   });
@@ -394,7 +336,7 @@ export async function POST(req: Request) {
                   // Update labels for response
                   classificationLabels = classifyData.labels || [];
                 } else {
-                  console.error(`❌ POST /api/track-visit - Re-classification failed:`, await classifyResponse.text());
+                  console.error(`❌ POST /api/track-visit - Classification failed:`, await classifyResponse.text());
                 }
               } else {
                 console.error(`❌ POST /api/track-visit - No extract found in Wikipedia response for ${title}`);
@@ -407,7 +349,7 @@ export async function POST(req: Request) {
           }
         }
       } catch (error) {
-        console.error(`❌ POST /api/track-visit - Error checking for re-classification:`, error);
+        console.error(`❌ POST /api/track-visit - Error checking for classification:`, error);
       }
     }
 
