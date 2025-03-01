@@ -66,7 +66,14 @@ export const processUniqueLabels = (
             // Keep AI topics with at least 2 nodes
             return stats.nodeCount >= 2;
         })
-        .sort((a, b) => b[1].count - a[1].count);
+        .sort((a, b) => {
+            // First prioritize by node count (how many entities have this label)
+            if (b[1].nodeCount !== a[1].nodeCount) {
+                return b[1].nodeCount - a[1].nodeCount;
+            }
+            // Then by total count (sum of entity counts)
+            return b[1].count - a[1].count;
+        });
 
     return distributeLabelsByCategory(allLabels);
 };

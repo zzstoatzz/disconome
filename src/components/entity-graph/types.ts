@@ -4,20 +4,18 @@ export type Label = {
     isHistorical?: boolean;
 };
 
-export type Node = {
+export interface Node {
     slug: string;
+    title: string;
+    count: number;
+    labels?: Label[];
     x: number;
     y: number;
-    size: number;
-    count: number;
-    title: string;
-    labels?: Label[];
-    explanation?: string;
-    isClassified?: boolean;
-    loggedMatch?: boolean;
+    size?: number;
     finalX?: number;
     finalY?: number;
-};
+    style?: React.CSSProperties;
+}
 
 export type Link = {
     source: string;

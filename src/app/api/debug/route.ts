@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { storage } from "@/lib/storage";
 import { STATS_PATH, CLASSIFICATIONS_PATH } from "@/app/constants";
+import { StatsMap } from "@/lib/types";
+import { slugify } from "@/lib/utils";
 
 export async function GET() {
     try {
@@ -68,4 +70,70 @@ export async function GET() {
             }
         });
     }
+}
+
+// Debug API for development and testing purposes
+export async function POST(req: Request) {
+  try {
+    const { action, title, removeClassification = false } = await req.json();
+    const slug = title ? slugify(title) : "";
+
+    // Handle different debug actions
+    switch (action) {
+      case "removeEntity":
+        if (!title) {
+          return NextResponse.json({
+            success: false,
+            error: "Title is required for removeEntity action"
+          }, { status: 400 });
+        }
+
+        // Get current stats
+        const stats = await storage.get<StatsMap>(STATS_PATH) || {};
+        
+        // Check if entity exists
+        if (!stats[slug]) {
+          return NextResponse.json({
+            success: false,
+            error: `Entity "${title}" (${slug}) not found in stats`
+          }, { status: 404 });
+        }
+
+        // Create a backup of the entity data
+        const entityBackup = stats[slug];
+        
+        // Remove entity from stats
+        delete stats[slug];
+        
+        // Save updated stats
+        await storage.put(STATS_PATH, stats);
+        
+        // Optionally remove classification
+        if (removeClassification) {
+          const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
+          await storage.delete(classificationPath);
+          console.log(`Removed classification for ${title}`);
+        }
+        
+        return NextResponse.json({
+          success: true,
+          message: `Removed entity "${title}" from graph${removeClassification ? ' and removed classification' : ''}`,
+          entityBackup,
+          remainingEntities: Object.keys(stats).length
+        });
+
+      default:
+        return NextResponse.json({
+          success: false,
+          error: `Unknown action: ${action}`
+        }, { status: 400 });
+    }
+  } catch (error) {
+    console.error("Error in debug API:", error);
+    return NextResponse.json({
+      success: false,
+      error: "Debug operation failed",
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
+  }
 } 

@@ -1,7 +1,14 @@
 ---
-description: 
-globs: 
-alwaysApply: true
+description: important rules to CHECK OFTEN
+globs: *.ts, *tsx
+alwaysApply: false
 ---
 
-be methodical, but you are prone to getting stuck in loops, stop for feedback often
+# tool use
+
+## shell
+- use `tree` and `rg` to identify project structure early and inform more close reading
+- never propose to run a server, the user will run all servers in hot-reload, so this is unnecessary
+
+## user
+- be methodical, but you are prone to getting stuck in loops, stop for feedback often

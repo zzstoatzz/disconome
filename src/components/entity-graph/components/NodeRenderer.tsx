@@ -10,6 +10,7 @@ interface NodeRendererProps {
     categoryColors: Record<string, string> | Map<string, string>;
     isDarkTheme: boolean;
     trendingTopics: Label[];
+    onContextMenu?: (e: React.MouseEvent, node: Node) => void;
 }
 
 const NodeRenderer: React.FC<NodeRendererProps> = ({
@@ -18,7 +19,8 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
     hoveredLabel,
     categoryColors,
     isDarkTheme,
-    trendingTopics
+    trendingTopics,
+    onContextMenu
 }) => {
     const router = useRouter();
 
@@ -76,15 +78,20 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
                     }
                 }
 
+                // Apply custom transition style if provided by the node
+                const nodeStyle = {
+                    ...getNodeStyle(i),
+                    pointerEvents: 'auto',
+                    ...(node.style || {}) // Apply any custom style from the node object
+                };
+
                 return (
                     <g
                         key={nodeKey}
                         onClick={() => router.push(`/wiki/${node.slug}`)}
+                        onContextMenu={(e) => onContextMenu && onContextMenu(e, node)}
                         className="group cursor-pointer"
-                        style={{
-                            ...getNodeStyle(i),
-                            pointerEvents: 'auto'
-                        }}
+                        style={nodeStyle as React.CSSProperties}
                     >
                         <circle
                             cx={nodeX}
@@ -117,13 +124,13 @@ const NodeRenderer: React.FC<NodeRendererProps> = ({
                             {node.title}
                         </text>
                         {isTrending && (
-                            <g transform={`translate(${nodeX - node.size * 0.6}, ${nodeY - node.size * 3})`}
+                            <g transform={`translate(${nodeX - (node.size || 0) * 0.6}, ${nodeY - (node.size || 0) * 3})`}
                                 className={`transition-all duration-300 ${isHighlighted ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                             >
                                 <image
                                     href="/bsky-logo.png"
-                                    width={node.size * 1.2}
-                                    height={node.size * 1.2}
+                                    width={node.size ? node.size * 1.2 : 0}
+                                    height={node.size ? node.size * 1.2 : 0}
                                     x={0}
                                     y={0}
                                     className="transition-all duration-300"

@@ -64,6 +64,160 @@ async function updateLabelStats(title: string, labels: Label[]) {
   }
 }
 
+// New function to analyze and consolidate labels across entities
+async function analyzeAndConsolidateLabels(newTitle: string, newLabels: Label[]) {
+  try {
+    console.log(`🔍 Analyzing labels for consolidation after adding: ${newTitle}`);
+    
+    // Get existing label stats
+    try {
+      const existingStats = await storage.get(LABEL_STATS_PATH);
+      if (!existingStats || typeof existingStats !== 'object') {
+        console.log("No existing label stats found, skipping consolidation");
+        return;
+      }
+    } catch {
+      console.log("No existing label stats found, skipping consolidation");
+      return;
+    }
+    
+    // Get all classifications
+    const paths = await storage.list(CLASSIFICATIONS_PATH);
+    const classifications = new Map<string, Classification>();
+    
+    // Load all classifications
+    await Promise.all(
+      paths.map(async (path) => {
+        try {
+          const data = await storage.get(path);
+          if (isClassification(data)) {
+            const slug = path
+              .replace(CLASSIFICATIONS_PATH, "")
+              .replace(".json", "");
+            classifications.set(slug, data);
+          }
+        } catch (error) {
+          console.error(`Error loading classification: ${path}`, error);
+        }
+      })
+    );
+    
+    // If we have fewer than 3 entities, skip consolidation
+    if (classifications.size < 3) {
+      console.log("Not enough entities for meaningful consolidation");
+      return;
+    }
+    
+    // Group entities by their labels to find patterns
+    const entitiesByLabel: Record<string, string[]> = {};
+    classifications.forEach((classification, slug) => {
+      classification.labels.forEach(label => {
+        if (label.source === 'ai') {
+          if (!entitiesByLabel[label.name]) {
+            entitiesByLabel[label.name] = [];
+          }
+          entitiesByLabel[label.name].push(classification.title || slug);
+        }
+      });
+    });
+    
+    // Get all entities as an array for analysis
+    const allEntities = Array.from(classifications.entries()).map(([slug, data]) => ({
+      title: data.title || slug,
+      labels: data.labels.filter(l => l.source === 'ai').map(l => l.name),
+      slug
+    }));
+    
+    // Only proceed if we have enough entities
+    if (allEntities.length >= 5) {
+      console.log(`Analyzing ${allEntities.length} entities for label patterns`);
+      
+      // Use AI to analyze entity patterns and suggest consolidations
+      const result = await generateObject({
+        model: openai("gpt-4o"),
+        schema: z.object({
+          consolidations: z.array(z.object({
+            entities: z.array(z.string()),
+            commonTheme: z.string(),
+            explanation: z.string()
+          }))
+        }),
+        prompt: `Analyze these entities and their current labels to identify groups that should share a common label but don't:
+
+${allEntities.map(e => `- ${e.title}: ${e.labels.join(", ")}`).join("\n")}
+
+Recently added: ${newTitle} with labels: ${newLabels.filter(l => l.source === 'ai').map(l => l.name).join(", ")}
+
+Your task is to identify groups of 3+ entities that are clearly related but don't share a common label.
+For example, if you see multiple tennis players labeled as "Athlete" and "Sports Figure" but none as "Tennis Player",
+you should suggest consolidating them under "Tennis Player" while keeping their other labels.
+
+Only suggest consolidations when there's a clear pattern and the entities are highly related.
+Return an empty array if no clear consolidation opportunities exist.
+
+For each consolidation opportunity, provide:
+1. The list of entity titles that should share the label
+2. The common theme/label they should all have
+3. A brief explanation of why this consolidation makes sense`
+      });
+      
+      // Process the suggested consolidations
+      if (result.object.consolidations.length > 0) {
+        console.log(`Found ${result.object.consolidations.length} potential label consolidations`);
+        
+        // Apply each consolidation
+        for (const consolidation of result.object.consolidations) {
+          const { entities, commonTheme, explanation } = consolidation;
+          
+          console.log(`Applying consolidation: "${commonTheme}" to ${entities.length} entities`);
+          console.log(`Reason: ${explanation}`);
+          
+          // Update each entity's classification
+          for (const entityTitle of entities) {
+            // Find the entity by title
+            const entity = allEntities.find(e => e.title === entityTitle);
+            if (entity) {
+              const classification = classifications.get(entity.slug);
+              if (classification) {
+                // Check if the entity already has this label
+                const hasLabel = classification.labels.some(l => 
+                  l.name.toLowerCase() === commonTheme.toLowerCase()
+                );
+                
+                if (!hasLabel) {
+                  // Add the new common label
+                  const updatedLabels = [
+                    ...classification.labels,
+                    { name: commonTheme, source: 'ai' as const }
+                  ];
+                  
+                  // Update the classification
+                  const updatedClassification = {
+                    ...classification,
+                    labels: updatedLabels,
+                    timestamp: Date.now()
+                  };
+                  
+                  // Save the updated classification
+                  await storage.put(`${CLASSIFICATIONS_PATH}${entity.slug}.json`, updatedClassification);
+                  console.log(`Updated classification for ${entityTitle} with new label: ${commonTheme}`);
+                  
+                  // Update label stats
+                  await updateLabelStats(entityTitle, [{ name: commonTheme, source: 'ai' as const }]);
+                }
+              }
+            }
+          }
+        }
+      } else {
+        console.log("No label consolidation opportunities found");
+      }
+    }
+  } catch (error) {
+    console.error("Error in label consolidation process:", error);
+  }
+}
+
 const ClassificationSchema = z.object({
   labels: z.array(z.string()).max(MAX_VISIBLE_LABELS),
   explanation: z.string(),
@@ -267,6 +421,9 @@ Your task is to maintain a consistent, well-organized knowledge graph by selecti
 
     // Update label usage statistics
     await updateLabelStats(title, aiLabels);
+    
+    // Analyze and consolidate labels across entities
+    await analyzeAndConsolidateLabels(title, aiLabels);
 
     // Return both AI and trending labels separately
     return NextResponse.json({

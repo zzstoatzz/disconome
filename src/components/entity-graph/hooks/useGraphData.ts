@@ -273,6 +273,7 @@ export const useGraphData = (
         isLoading,
         nodesLoaded,
         labelsLoaded,
-        refreshData // Export the refresh function
+        refreshData,
+        setNodes
     };
 }; 
