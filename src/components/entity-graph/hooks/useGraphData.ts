@@ -54,6 +54,12 @@ export const useGraphData = (
         if (nodes.length > 0) {
             setNodesLoaded(true);
 
+            // Calculate edges immediately when nodes are loaded
+            console.log(`useGraphData: Initial edge calculation for ${nodes.length} nodes`);
+            const initialEdges = calculateEdges(nodes, hoveredLabel);
+            console.log(`useGraphData: Initially calculated ${initialEdges.length} edges`);
+            setEdges(initialEdges);
+
             // Instead of immediately hiding the loading screen, start the transition
             if (isDataFetched.current && !isTransitioning) {
                 setIsTransitioning(true);
@@ -83,7 +89,7 @@ export const useGraphData = (
                 }, 300); // Reduced from 500ms to 300ms for faster start
             }
         }
-    }, [nodes, nodesLoaded, isTransitioning, containerRef, dimensions, setIsInitialLoading, setIsTransitioning, setInitialNodePositions]);
+    }, [nodes, nodesLoaded, isTransitioning, containerRef, dimensions, setIsInitialLoading, setIsTransitioning, setInitialNodePositions, hoveredLabel]);
 
     // Update the data fetching effect to handle loading state
     useEffect(() => {
@@ -385,7 +391,18 @@ export const useGraphData = (
     // Add effect to recalculate edges when nodes are updated or hoveredLabel changes
     useEffect(() => {
         if (nodes.length > 0) {
-            setEdges(calculateEdges(nodes, hoveredLabel));
+            // Only recalculate edges when nodes change or hoveredLabel changes
+            // Use a debounce to prevent too frequent updates
+            const timer = setTimeout(() => {
+                console.log(`useGraphData: Recalculating edges for ${nodes.length} nodes with ${hoveredLabel ? 'hovered label: ' + hoveredLabel.name : 'no hovered label'}`);
+                const newEdges = calculateEdges(nodes, hoveredLabel);
+                console.log(`useGraphData: Calculated ${newEdges.length} edges`);
+                setEdges(newEdges);
+            }, 100);
+
+            return () => clearTimeout(timer);
+        } else {
+            console.log("useGraphData: No nodes available for edge calculation");
         }
     }, [nodes, hoveredLabel]);
 
@@ -410,5 +427,5 @@ export const useGraphData = (
             document.removeEventListener("selectRandomNode", handleRandomNode);
     }, [nodes]);
 
-    return { nodes, setNodes, edges, isLoading };
+    return { nodes, setNodes, edges, setEdges, isLoading };
 }; 

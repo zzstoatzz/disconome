@@ -68,41 +68,54 @@ export const injectAnimationStyles = () => {
 };
 
 // Create connecting lines between orbital nodes
-export const createConnectingLines = (orbitalNodes: OrbitalNodeType[]) => {
-  // Get the SVG element that contains the orbital nodes
-  const orbitalSvg = document.querySelector('.orbital-node')?.closest('svg');
-  if (!orbitalSvg) return;
-
-  // Get the connecting lines group
-  const linesGroup = orbitalSvg.querySelector('.connecting-lines');
-  if (!linesGroup) return;
+export const createConnectingLines = (
+  svgElement: SVGSVGElement,
+  orbitalNodes: OrbitalNodeType[],
+  isDarkTheme: boolean
+) => {
+  if (!svgElement || orbitalNodes.length === 0) return;
 
   // Clear existing lines
-  while (linesGroup.firstChild) {
-    linesGroup.removeChild(linesGroup.firstChild);
+  const existingLines = svgElement.querySelectorAll('.orbital-connecting-line');
+  existingLines.forEach(line => line.remove());
+
+  // Create a group for the lines if it doesn't exist
+  let linesGroup = svgElement.querySelector('.connecting-lines-group');
+  if (!linesGroup) {
+    linesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    linesGroup.classList.add('connecting-lines-group');
+    svgElement.appendChild(linesGroup);
   }
 
   // Create a subset of connections (not all nodes should connect)
-  // This creates a more pleasing visual effect
   for (let i = 0; i < orbitalNodes.length; i++) {
     // Connect to 2-3 other nodes
     const numConnections = 2 + Math.floor(Math.random());
 
     for (let j = 0; j < numConnections; j++) {
-      // Connect to a random node that's not too far away
-      const targetIndex = (i + 1 + Math.floor(Math.random() * 5)) % orbitalNodes.length;
-
       // Create the line element
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.classList.add('orbital-connecting-line');
 
       // Set attributes
-      line.setAttribute('x1', '0');
-      line.setAttribute('y1', '0');
-      line.setAttribute('x2', '0');
-      line.setAttribute('y2', '0');
-      line.setAttribute('stroke', 'rgba(255, 255, 255, 0.15)');
+      line.setAttribute('stroke', isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)');
       line.setAttribute('stroke-width', '0.5');
       line.setAttribute('stroke-dasharray', '1,2');
+
+      // Calculate positions based on orbital animation
+      const sourceAngle = Math.random() * Math.PI * 2;
+      const targetAngle = Math.random() * Math.PI * 2;
+      const radius = 50; // Same as in the orbit animation
+
+      const sourceX = Math.cos(sourceAngle) * radius;
+      const sourceY = Math.sin(sourceAngle) * radius;
+      const targetX = Math.cos(targetAngle) * radius;
+      const targetY = Math.sin(targetAngle) * radius;
+
+      line.setAttribute('x1', sourceX.toString());
+      line.setAttribute('y1', sourceY.toString());
+      line.setAttribute('x2', targetX.toString());
+      line.setAttribute('y2', targetY.toString());
 
       // Add animation
       const animateElement = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
@@ -114,47 +127,15 @@ export const createConnectingLines = (orbitalNodes: OrbitalNodeType[]) => {
 
       line.appendChild(animateElement);
       linesGroup.appendChild(line);
-
-      // Update line positions based on orbital node positions
-      const updateLinePosition = () => {
-        const sourceNode = orbitalSvg.querySelectorAll('.orbital-node')[i];
-        const targetNode = orbitalSvg.querySelectorAll('.orbital-node')[targetIndex];
-
-        if (sourceNode && targetNode) {
-          // Get the transform matrix to extract position
-          const sourceTransform = window.getComputedStyle(sourceNode).transform;
-          const targetTransform = window.getComputedStyle(targetNode).transform;
-
-          // Extract translation values (simplified approach)
-          const sourceMatch = sourceTransform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
-          const targetMatch = targetTransform.match(/translate\(([^,]+)px,\s*([^)]+)px\)/);
-
-          if (sourceMatch && targetMatch) {
-            const sourceX = parseFloat(sourceMatch[1]);
-            const sourceY = parseFloat(sourceMatch[2]);
-            const targetX = parseFloat(targetMatch[1]);
-            const targetY = parseFloat(targetMatch[2]);
-
-            line.setAttribute('x1', sourceX.toString());
-            line.setAttribute('y1', sourceY.toString());
-            line.setAttribute('x2', targetX.toString());
-            line.setAttribute('y2', targetY.toString());
-          }
-        }
-
-        requestAnimationFrame(updateLinePosition);
-      };
-
-      updateLinePosition();
     }
   }
 };
 
 // Get node style for animation
-export const getNodeStyle = (index: number, nodeVisibility: boolean[] = []) => {
+export const getNodeStyle = (index: number) => {
   const style: CSSProperties = {
-    opacity: nodeVisibility[index] ? 1 : 0,
-    transform: `scale(${nodeVisibility[index] ? 1 : 0})`,
+    opacity: 1,
+    transform: 'scale(1)',
     transition: `opacity 0.5s ease-out ${index * 0.02}s, transform 0.5s ease-out ${index * 0.02}s`,
   };
 
