@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { storage } from "@/lib/storage";
-import { StatsMap, Label } from "@/lib/types";
+import { StatsMap, Label, Classification } from "@/lib/types";
 import { slugify, isClassification } from "@/lib/utils";
 import { STATS_PATH, CLASSIFICATIONS_PATH } from "@/app/constants";
 
@@ -123,7 +123,7 @@ export async function GET() {
       console.log(`📊 GET /api/track-visit - First few classification paths:`, classificationPaths.slice(0, 5));
     }
 
-    const classifications = new Map();
+    const classifications = new Map<string, Classification>();
     const deletedEntities = new Set<string>(); // Track entities that have been deleted
 
     // Load all classifications in parallel
@@ -137,6 +137,12 @@ export async function GET() {
             const slug = path.replace(CLASSIFICATIONS_PATH, "").replace(".json", "");
             deletedEntities.add(slug);
             console.log(`🗑️ GET /api/track-visit - Found deleted entity: ${slug}`);
+          } else if (data && typeof data === 'object' && 'needsReclassification' in data) {
+            // This entity was removed and needs re-classification
+            // We'll exclude it from the graph until it's visited again
+            const slug = path.replace(CLASSIFICATIONS_PATH, "").replace(".json", "");
+            deletedEntities.add(slug);
+            console.log(`🔄 GET /api/track-visit - Found entity marked for re-classification: ${slug}`);
           } else if (isClassification(data)) {
             const slug = path.replace(CLASSIFICATIONS_PATH, "").replace(".json", "");
             console.log(`📑 GET /api/track-visit - Classification for ${slug}:`, {
@@ -255,76 +261,153 @@ export async function POST(req: Request) {
       console.log(`📝 POST /api/track-visit - Created new entry for ${normalizedTitle}`);
     }
 
-    // Classify the entity if extract is provided
+    // If extract is provided, classify the entity
     let classificationLabels: Label[] = [];
     if (extract) {
       try {
-        // Get all existing classifications for context
-        const existingClassifications = await storage.list(CLASSIFICATIONS_PATH);
-        const existingLabels = await Promise.all(
-          existingClassifications.map(async (path) => {
-            const data = await storage.get(path);
-            if (isClassification(data)) {
-              return data.labels;
+        // Fetch existing classifications for context
+        const classificationPaths = await storage.list(CLASSIFICATIONS_PATH);
+        const classifications = new Map<string, Classification>();
+        
+        // Load all classifications
+        await Promise.all(
+          classificationPaths.map(async (path) => {
+            try {
+              const data = await storage.get(path);
+              if (isClassification(data)) {
+                const slug = path.replace(CLASSIFICATIONS_PATH, "").replace(".json", "");
+                classifications.set(slug, data);
+              }
+            } catch (error) {
+              console.error(`Error loading classification: ${path}`, error);
             }
-            return [];
           })
         );
-
-        // Flatten and filter unique labels for context
-        const uniqueExistingLabels = Array.from(new Set(
-          existingLabels.flat().filter(Boolean).map(l => l.name)
-        ));
-
-        console.log(`🏷️ Existing labels for context:`, uniqueExistingLabels);
-
-        const classifyResponse = await fetch('http://localhost:3000/api/classify', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            title,
-            extract,
-            existingLabels: uniqueExistingLabels // Pass existing labels for context
-          }),
-        });
-
+        
+        // Get unique labels for context
+        const uniqueLabels = Array.from(
+          new Set(
+            Array.from(classifications.values()).flatMap((c: Classification) =>
+              c.labels.filter((l: Label) => l.source === "ai").map((l: Label) => l.name)
+            )
+          )
+        );
+        
+        console.log(`🏷️ POST /api/track-visit - Classifying entity: ${title}`);
+        console.log(`🧠 POST /api/track-visit - Context labels: ${uniqueLabels.join(", ")}`);
+        
+        // Call classification API
+        const classifyResponse = await fetch(
+          "http://localhost:3000/api/classify",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              title,
+              extract,
+            }),
+          }
+        );
+        
         if (classifyResponse.ok) {
-          const classification = await classifyResponse.json();
-          const targetSlug = existingEntry ? existingEntry[0] : slug;
-
-          // Log the classification response
-          console.log(`🤖 Classification response for ${title}:`, {
-            aiLabels: classification.labels?.map((l: Label) => `${l.name} (${l.source})`),
-            trendingLabels: classification.trendingLabels?.map((l: Label) => `${l.name} (${l.source})`)
+          const classifyData = await classifyResponse.json();
+          console.log(`✅ POST /api/track-visit - Classification successful:`, {
+            labels: classifyData.labels?.map((l: Label) => `${l.name} (${l.source})`),
+            explanation: classifyData.explanation?.slice(0, 50) + "...",
           });
-
-          // Only include trending labels that match the entity title
-          const matchingTrendingLabels = (classification.trendingLabels || [])
-            .filter((topic: { name: string; source: 'trending' }) => {
-              const topicSlug = slugify(topic.name);
-              const entitySlug = slugify(title);
-              return topicSlug === entitySlug;
-            });
-
-          // Combine AI and matching trending labels
-          classificationLabels = [...(classification.labels || []), ...matchingTrendingLabels];
-
+          
           // Save classification
-          await storage.put(`${CLASSIFICATIONS_PATH}${targetSlug}.json`, {
-            labels: classificationLabels,
-            explanation: classification.explanation,
-            timestamp: Date.now()
-          });
-
-          console.log(`💾 Saved classification for ${title}:`, {
-            labels: classificationLabels.map((l: Label) => `${l.name} (${l.source})`),
-            explanation: classification.explanation?.slice(0, 50) + '...'
-          });
+          const classification: Classification = {
+            labels: classifyData.labels,
+            explanation: classifyData.explanation,
+            timestamp: Date.now(),
+            title,
+          };
+          
+          await storage.put(`${CLASSIFICATIONS_PATH}${slug}.json`, classification);
+          
+          // Update labels for response
+          classificationLabels = classifyData.labels || [];
+        } else {
+          console.error(`❌ POST /api/track-visit - Classification failed:`, await classifyResponse.text());
         }
       } catch (error) {
-        console.error("Failed to classify entity:", error);
+        console.error(`❌ POST /api/track-visit - Error during classification:`, error);
+      }
+    } else {
+      // Check if this entity needs re-classification (was previously removed)
+      try {
+        const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
+        const existingClassification = await storage.get(classificationPath);
+        
+        if (existingClassification && typeof existingClassification === 'object' && 'needsReclassification' in existingClassification) {
+          console.log(`🔄 POST /api/track-visit - Entity needs re-classification: ${title}`);
+          
+          // Fetch Wikipedia extract for this entity
+          try {
+            const wikiResponse = await fetch(
+              `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
+            );
+            
+            if (wikiResponse.ok) {
+              const wikiData = await wikiResponse.json();
+              const extract = wikiData.extract;
+              
+              if (extract) {
+                console.log(`📝 POST /api/track-visit - Fetched Wikipedia extract for ${title}`);
+                
+                // Call classification API with force reclassify flag
+                const classifyResponse = await fetch(
+                  "http://localhost:3000/api/classify",
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      title,
+                      extract,
+                      forceReclassify: true
+                    }),
+                  }
+                );
+                
+                if (classifyResponse.ok) {
+                  const classifyData = await classifyResponse.json();
+                  console.log(`✅ POST /api/track-visit - Re-classification successful:`, {
+                    labels: classifyData.labels?.map((l: Label) => `${l.name} (${l.source})`),
+                    explanation: classifyData.explanation?.slice(0, 50) + "...",
+                  });
+                  
+                  // Save classification
+                  const classification: Classification = {
+                    labels: classifyData.labels,
+                    explanation: classifyData.explanation,
+                    timestamp: Date.now(),
+                    title,
+                  };
+                  
+                  await storage.put(`${CLASSIFICATIONS_PATH}${slug}.json`, classification);
+                  
+                  // Update labels for response
+                  classificationLabels = classifyData.labels || [];
+                } else {
+                  console.error(`❌ POST /api/track-visit - Re-classification failed:`, await classifyResponse.text());
+                }
+              } else {
+                console.error(`❌ POST /api/track-visit - No extract found in Wikipedia response for ${title}`);
+              }
+            } else {
+              console.error(`❌ POST /api/track-visit - Failed to fetch Wikipedia extract for ${title}:`, await wikiResponse.text());
+            }
+          } catch (error) {
+            console.error(`❌ POST /api/track-visit - Error fetching Wikipedia extract:`, error);
+          }
+        }
+      } catch (error) {
+        console.error(`❌ POST /api/track-visit - Error checking for re-classification:`, error);
       }
     }
 

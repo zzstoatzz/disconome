@@ -226,6 +226,13 @@ class BlobStorage implements StorageInterface {
                         console.log(`🗑️ Storage - Skipping deleted blob: ${blob.pathname}`);
                         continue;
                     }
+                    
+                    // Skip files marked for re-classification but still include them in the result
+                    // This ensures they're not treated as deleted but can be handled specially
+                    if (data && typeof data === 'object' && data.needsReclassification === true) {
+                        console.log(`🔄 Storage - Found blob marked for re-classification: ${blob.pathname}`);
+                        // We still add it to filteredBlobs so it's included in the result
+                    }
 
                     filteredBlobs.push(blob);
                     console.log(`📋 Storage - Added valid blob: ${blob.pathname}`);

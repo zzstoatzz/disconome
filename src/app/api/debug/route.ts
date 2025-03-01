@@ -108,16 +108,24 @@ export async function POST(req: Request) {
         // Save updated stats
         await storage.put(STATS_PATH, stats);
         
-        // Optionally remove classification
+        // Handle classification
         if (removeClassification) {
           const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
-          await storage.delete(classificationPath);
-          console.log(`Removed classification for ${title}`);
+          
+          // Instead of deleting, mark it as needing re-classification
+          // by storing a special flag in the classification
+          await storage.put(classificationPath, {
+            needsReclassification: true,
+            removedAt: Date.now(),
+            originalTitle: title
+          });
+          
+          console.log(`Marked ${title} for re-classification`);
         }
         
         return NextResponse.json({
           success: true,
-          message: `Removed entity "${title}" from graph${removeClassification ? ' and removed classification' : ''}`,
+          message: `Removed entity "${title}" from graph${removeClassification ? ' and marked for re-classification' : ''}`,
           entityBackup,
           remainingEntities: Object.keys(stats).length
         });

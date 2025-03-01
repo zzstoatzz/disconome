@@ -278,7 +278,7 @@ async function getClassificationsCache() {
 
 export async function POST(req: Request) {
   try {
-    const { title, extract } = await req.json();
+    const { title, extract, forceReclassify = false } = await req.json();
     const slug = slugify(title);
 
     // Get trending topics first since we need them regardless of cache
@@ -300,9 +300,10 @@ export async function POST(req: Request) {
     // Get cached classifications
     const classifications = await getClassificationsCache();
     const cached = classifications.get(slug);
+    const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
 
-    // If we have a valid cache, return it with current trending topics
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    // If we have a valid cache and not forcing reclassification, return it with current trending topics
+    if (!forceReclassify && cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       console.log(`📦 Using cached classification for ${title}`);
       return NextResponse.json({
         labels: cached.labels,
@@ -311,22 +312,24 @@ export async function POST(req: Request) {
       });
     }
 
-    // Check for existing classification in storage
-    const classificationPath = `${CLASSIFICATIONS_PATH}${slug}.json`;
-    const existingClassification = await storage.get(classificationPath);
+    // Check for existing classification in storage if not forcing reclassification
+    if (!forceReclassify) {
+      const existingClassification = await storage.get(classificationPath);
 
-    if (existingClassification && isClassification(existingClassification)) {
-      console.log(`📦 Using stored classification for ${title}`);
-      // Cache the result
-      classifications.set(slug, existingClassification);
-      return NextResponse.json({
-        labels: existingClassification.labels,
-        trendingLabels,
-        explanation: existingClassification.explanation
-      });
+      if (existingClassification && isClassification(existingClassification) && 
+          !('needsReclassification' in existingClassification)) {
+        console.log(`📦 Using stored classification for ${title}`);
+        // Cache the result
+        classifications.set(slug, existingClassification);
+        return NextResponse.json({
+          labels: existingClassification.labels,
+          trendingLabels,
+          explanation: existingClassification.explanation
+        });
+      }
     }
 
-    console.log(`🤖 Generating new classification for ${title}`);
+    console.log(`🤖 ${forceReclassify ? 'Force re-classifying' : 'Generating new classification'} for ${title}`);
 
     // Get current stats to find top viewed nodes
     const stats = await storage.get(STATS_PATH);
