@@ -1,8 +1,8 @@
 import React from 'react';
 import { CSSProperties } from 'react';
 
-// Type for orbital nodes
-type OrbitalNode = {
+// Type for orbital nodes used in the createConnectingLines function
+type OrbitalNodeType = {
   size: number;
   color: string;
   style: React.CSSProperties;
@@ -68,7 +68,7 @@ export const injectAnimationStyles = () => {
 };
 
 // Create connecting lines between orbital nodes
-export const createConnectingLines = (orbitalNodes: any[]) => {
+export const createConnectingLines = (orbitalNodes: OrbitalNodeType[]) => {
   // Get the SVG element that contains the orbital nodes
   const orbitalSvg = document.querySelector('.orbital-node')?.closest('svg');
   if (!orbitalSvg) return;

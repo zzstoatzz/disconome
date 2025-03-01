@@ -1,5 +1,3 @@
-import { ClassificationResponse } from "@/lib/api-types";
-
 export type Label = {
     name: string;
     source: 'trending' | 'ai';
@@ -30,6 +28,10 @@ export type Link = {
 export type Edge = {
     source: Node;
     target: Node;
+    sourceX: number;
+    sourceY: number;
+    targetX: number;
+    targetY: number;
     label: Label;
     labels: Label[];
     strength: number;

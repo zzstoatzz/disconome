@@ -2,14 +2,14 @@
 
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Node, Edge, Label, GraphDimensions, NodePositions } from "./types";
+import { Label, GraphDimensions } from "./types";
 import SvgFilters from "./svg/SvgFilters";
 import { useGraphTheme } from "./hooks/useGraphTheme";
 import { useNodeAnimation } from "./hooks/useNodeAnimation";
 import { useTrendingTopics } from "./hooks/useTrendingTopics";
 import { useGraphData } from "./hooks/useGraphData";
 import { getNodeColor, getEdgeStyle, getNodeStyle } from "./utils/graphCalculations";
-import { processUniqueLabels, distributeLabels, generateCategoryColors } from "./utils/labelProcessing";
+import { processUniqueLabels, generateCategoryColors } from "./utils/labelProcessing";
 import { injectAnimationStyles, createConnectingLines } from "./utils/animationHelpers";
 
 const EntityGraph: React.FC = () => {
@@ -31,12 +31,12 @@ const EntityGraph: React.FC = () => {
 
     // Custom hooks
     const { isDarkTheme } = useGraphTheme();
-    const { orbitalNodes, animationProgress, getAnimatedPosition } = useNodeAnimation(
+    const { orbitalNodes } = useNodeAnimation(
         isInitialLoading,
         isTransitioning
     );
     const { trendingTopics } = useTrendingTopics();
-    const { nodes, edges, isLoading } = useGraphData(
+    const { nodes, edges } = useGraphData(
         containerRef,
         dimensions,
         hoveredLabel,
@@ -62,16 +62,31 @@ const EntityGraph: React.FC = () => {
     useEffect(() => {
         const updateDimensions = () => {
             if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                console.log(`📏 EntityGraph - Container dimensions updated:`, {
+                    width: rect.width,
+                    height: rect.height
+                });
                 setDimensions({
-                    width: containerRef.current.clientWidth,
-                    height: containerRef.current.clientHeight,
+                    width: rect.width,
+                    height: rect.height,
                 });
             }
         };
 
+        // Initial update
         updateDimensions();
+
+        // Update on resize
         window.addEventListener("resize", updateDimensions);
-        return () => window.removeEventListener("resize", updateDimensions);
+
+        // Also update after a short delay to ensure container is fully rendered
+        const timeoutId = setTimeout(updateDimensions, 500);
+
+        return () => {
+            window.removeEventListener("resize", updateDimensions);
+            clearTimeout(timeoutId);
+        };
     }, []);
 
     // Inject animation styles
@@ -93,6 +108,13 @@ const EntityGraph: React.FC = () => {
         <div
             ref={containerRef}
             className="relative w-full h-full overflow-hidden bg-white dark:bg-gray-950 transition-colors duration-200"
+            style={{
+                minHeight: '500px',
+                zIndex: 1,
+                position: 'relative',
+                visibility: 'visible',
+                display: 'block'
+            }}
         >
             <SvgFilters />
 
@@ -127,32 +149,43 @@ const EntityGraph: React.FC = () => {
                 </div>
             )}
 
-            {/* Main Graph */}
+            {/* Main Graph - Using simple SVG approach that works */}
             <svg
+                width="100%"
+                height="100%"
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    zIndex: 30,
+                    pointerEvents: 'none'
+                }}
                 ref={svgRef}
-                width={dimensions.width}
-                height={dimensions.height}
-                className={`transition-opacity duration-500 ${isInitialLoading ? "opacity-0" : "opacity-100"}`}
             >
-                <g className="edges">
-                    {!isTransitioning && !isInitialLoading && edges.map((edge, i) => {
-                        const edgeKey = `edge-${edge.source.slug}-${edge.target.slug}-${i}`;
-                        return (
-                            <g key={edgeKey}>
-                                <line
-                                    x1={edge.source.x}
-                                    y1={edge.source.y}
-                                    x2={edge.target.x}
-                                    y2={edge.target.y}
-                                    style={getEdgeStyle(edge, hoveredLabel, categoryColors, isDarkTheme, time)}
-                                    className="transition-all duration-300"
-                                />
-                            </g>
-                        );
-                    })}
-                </g>
+                <defs>
+                    <filter id="node-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="2" floodOpacity="0.3" />
+                    </filter>
+                </defs>
 
-                {nodes.map((node, i) => {
+                {/* Draw edges */}
+                {!isTransitioning && !isInitialLoading && edges.map((edge, i) => {
+                    const edgeKey = `edge-${edge.source.slug}-${edge.target.slug}-${i}`;
+                    return (
+                        <line
+                            key={edgeKey}
+                            x1={edge.sourceX}
+                            y1={edge.sourceY}
+                            x2={edge.targetX}
+                            y2={edge.targetY}
+                            style={getEdgeStyle(edge, hoveredLabel, categoryColors, isDarkTheme, time)}
+                            className="transition-all duration-300"
+                        />
+                    );
+                })}
+
+                {/* Draw nodes */}
+                {!isInitialLoading && nodes.map((node, i) => {
                     const nodeKey = `node-${node.slug}-${i}`;
                     const nodeSlug = node.title.toLowerCase().replace(/\s+/g, '-');
                     const isTrending = trendingTopics.some(topic =>
@@ -161,44 +194,62 @@ const EntityGraph: React.FC = () => {
                     const activeLabel = hoveredLabel;
                     const isHighlighted = activeLabel && node.labels?.some(l => l.name === activeLabel.name);
 
-                    // Get center position for initial animation
-                    const center = {
-                        x: dimensions.width / 2,
-                        y: dimensions.height / 2
-                    };
+                    // Find all edges where this node is the source or target
+                    const nodeEdges = edges.filter(edge =>
+                        edge.source.slug === node.slug || edge.target.slug === node.slug
+                    );
 
-                    // Calculate animated position
-                    const animatedNode = isTransitioning
-                        ? getAnimatedPosition(node, center)
-                        : node;
+                    // If we found edges for this node, use their coordinates
+                    let nodeX = node.x;
+                    let nodeY = node.y;
+
+                    if (nodeEdges.length > 0) {
+                        // Use the first edge's coordinates
+                        const edge = nodeEdges[0];
+                        if (edge.source.slug === node.slug) {
+                            nodeX = edge.sourceX;
+                            nodeY = edge.sourceY;
+                        } else {
+                            nodeX = edge.targetX;
+                            nodeY = edge.targetY;
+                        }
+                    }
+
+                    // Debug node position for the first few nodes
+                    if (i < 3) {
+                        console.log(`Node ${i} (${node.title}): Position (${nodeX.toFixed(0)}, ${nodeY.toFixed(0)})`);
+                    }
 
                     return (
                         <g
                             key={nodeKey}
-                            transform={`translate(${animatedNode.x},${animatedNode.y})`}
                             onClick={() => router.push(`/wiki/${node.slug}`)}
                             className="group cursor-pointer"
-                            style={getNodeStyle(i)}
+                            style={{
+                                ...getNodeStyle(i),
+                                pointerEvents: 'auto'
+                            }}
                         >
                             <circle
+                                cx={nodeX}
+                                cy={nodeY}
                                 r={node.size}
                                 fill={getNodeColor(node, i, hoveredLabel, categoryColors, isDarkTheme)}
                                 stroke={
                                     isTrending
                                         ? "rgba(14, 165, 233, 0.8)"
                                         : isDarkTheme
-                                            ? "rgba(255, 255, 255, 0.3)"
-                                            : "rgba(0, 0, 0, 0.3)"
+                                            ? "rgba(255, 255, 255, 0.6)"
+                                            : "rgba(0, 0, 0, 0.6)"
                                 }
-                                strokeWidth={isTrending ? 0.75 : 0.25}
+                                strokeWidth={isTrending ? 2 : 1}
                                 className={`transition-all duration-300 hover:opacity-90`}
-                                filter={isTrending ? "url(#trending-glow)" : undefined}
-                                style={isTrending ? {
-                                    animation: 'pulse 3s ease-in-out infinite'
-                                } : undefined}
+                                filter="url(#node-shadow)"
+                                style={isTrending ? { animation: 'pulse 3s ease-in-out infinite' } : {}}
                             />
                             <text
-                                dy="-10"
+                                x={nodeX}
+                                y={nodeY - 10}
                                 textAnchor="middle"
                                 className={`text-xs transition-opacity duration-300 pointer-events-none 
                                 ${isDarkTheme ? "fill-white" : "fill-gray-800"} 
@@ -210,7 +261,7 @@ const EntityGraph: React.FC = () => {
                                 {node.title}
                             </text>
                             {isTrending && (
-                                <g transform={`translate(${-node.size * 0.6}, ${-node.size * 3})`}
+                                <g transform={`translate(${nodeX - node.size * 0.6}, ${nodeY - node.size * 3})`}
                                     className={`transition-all duration-300 ${isHighlighted ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                                 >
                                     <image
@@ -234,7 +285,7 @@ const EntityGraph: React.FC = () => {
             <div className="fixed top-0 left-0 right-0 z-20">
                 <div className="flex flex-col">
                     {uniqueLabels.length > 0 && (
-                        <div className="p-2 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm transition-colors duration-200">
+                        <div className="p-2 bg-white dark:bg-gray-950 transition-colors duration-200">
                             <div className="max-w-screen-2xl mx-auto">
                                 <div className="flex flex-col space-y-2">
                                     <div className="flex items-center justify-between">
@@ -245,7 +296,7 @@ const EntityGraph: React.FC = () => {
                                     </div>
                                     <div
                                         ref={labelsContainerRef}
-                                        className="labels-container flex flex-nowrap space-x-2 overflow-x-auto pb-2 max-w-full">
+                                        className="labels-container flex flex-nowrap space-x-2 overflow-x-auto pb-2 max-w-full justify-center">
                                         {uniqueLabels.map((label) => {
                                             const labelKey = `label-${label.name}-${label.source}`;
                                             return (

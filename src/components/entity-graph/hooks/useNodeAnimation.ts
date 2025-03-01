@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Node, NodePositions } from '../types';
+import { Node } from '../types';
 
 // Define a type for orbital nodes used in the loading animation
 type OrbitalNode = {
@@ -92,17 +92,34 @@ export const useNodeAnimation = (
 
     // Helper function to calculate node position during animation
     const getAnimatedPosition = (node: Node, initialPos: { x: number, y: number }) => {
-        if (!node.finalX || !node.finalY) return node;
+        // If node doesn't have final position, use current position
+        if (!node.finalX || !node.finalY) {
+            console.log(`⚠️ Node ${node.title} missing final position, using current position (${node.x}, ${node.y})`);
+            return node;
+        }
+
+        // Ensure initialPos has valid values
+        const safeInitialPos = {
+            x: isNaN(initialPos.x) || initialPos.x <= 0 ? 500 : initialPos.x,
+            y: isNaN(initialPos.y) || initialPos.y <= 0 ? 500 : initialPos.y
+        };
 
         // Calculate the current position based on progress
-        const x = initialPos.x + (node.finalX - initialPos.x) * animationProgress;
-        const y = initialPos.y + (node.finalY - initialPos.y) * animationProgress;
+        const x = safeInitialPos.x + (node.finalX - safeInitialPos.x) * animationProgress;
+        const y = safeInitialPos.y + (node.finalY - safeInitialPos.y) * animationProgress;
 
-        return {
-            ...node,
-            x,
-            y
-        };
+        // Only log for a few nodes to avoid console spam
+        if (node.title.startsWith('A') || node.title.startsWith('B')) {
+            console.log(`🔄 Animating ${node.title}: ${safeInitialPos.x.toFixed(0)},${safeInitialPos.y.toFixed(0)} → ${node.finalX.toFixed(0)},${node.finalY.toFixed(0)} (progress: ${animationProgress.toFixed(2)}) = ${x.toFixed(0)},${y.toFixed(0)}`);
+        }
+
+        // IMPORTANT: We need to directly modify the original node object
+        // because the edges reference these same node objects
+        node.x = x;
+        node.y = y;
+
+        // Return the modified node
+        return node;
     };
 
     return {

@@ -30,7 +30,8 @@ export const useGraphData = (
     // Calculate node size based on count and trending status
     const calculateNodeSize = useCallback((count: number, data: { count: number }[], slug: string) => {
         const maxCount = Math.max(...data.map((d) => d.count));
-        const baseSize = 6 + (count / maxCount) * 12;
+        // Increase the base size to make nodes more visible
+        const baseSize = 10 + (count / maxCount) * 15;
         // Use the same slug normalization for size calculation
         const nodeSlug = slug.toLowerCase().replace(/\s+/g, '-');
         const isTrending = trendingTopics.some(topic => {
@@ -58,7 +59,7 @@ export const useGraphData = (
                 setIsTransitioning(true);
 
                 // Capture initial positions at the center for animation
-                const center = getCenter(containerRef, dimensions);
+                const center = getCenter(containerRef as React.RefObject<HTMLDivElement | null>, dimensions);
                 const positions: { [key: string]: { x: number; y: number } } = {};
 
                 nodes.forEach((node) => {
@@ -115,6 +116,16 @@ export const useGraphData = (
                         type: typeof data
                     });
 
+                    // Debug: Log the first few items to check structure
+                    if (Array.isArray(data) && data.length > 0) {
+                        console.log("🔍 useGraphData - First data item sample:", {
+                            slug: data[0].slug,
+                            title: data[0].title,
+                            count: data[0].count,
+                            labels: data[0].labels
+                        });
+                    }
+
                     if (!data || !Array.isArray(data)) {
                         console.error("❌ useGraphData - Invalid data format received:", data);
                         dataFetchingInProgressRef.current = false;
@@ -150,7 +161,7 @@ export const useGraphData = (
                     console.log(`🔍 useGraphData - Processing ${data.length} entities`);
 
                     // First pass: create nodes - process in batches for better performance
-                    const processEntitiesInBatches = (entities: any[], batchSize = 10) => {
+                    const processEntitiesInBatches = (entities: { slug: string; title: string; count: number; labels?: Label[] }[], batchSize = 10) => {
                         let index = 0;
                         let validCount = 0;
                         let invalidCount = 0;
@@ -218,18 +229,46 @@ export const useGraphData = (
                         console.log(`🔍 useGraphData - Selected top ${topNodes.length} nodes`);
 
                         // Distribute nodes evenly - they'll start at center and animate outward
-                        const center = getCenter(containerRef, dimensions);
+                        const center = getCenter(containerRef as React.RefObject<HTMLDivElement | null>, dimensions);
                         console.log(`🔍 useGraphData - Center position:`, center);
 
+                        // Use a larger radius to ensure nodes are distributed more widely
+                        // Make sure radius is proportional to the container size but with a minimum value
+                        const radius = Math.max(Math.min(center.x, center.y) * 0.8, 350);
+                        console.log(`🔍 useGraphData - Using radius: ${radius}`);
+
+                        // Force dimensions update if they're not set yet
+                        if (dimensions.width <= 0 || dimensions.height <= 0) {
+                            const rect = containerRef.current?.getBoundingClientRect();
+                            if (rect) {
+                                console.log(`🔍 useGraphData - Container has dimensions but not passed to hook:`, {
+                                    width: rect.width,
+                                    height: rect.height
+                                });
+                                // We can't call setDimensions here as it's not passed to this hook
+                                // Just use the rect dimensions directly for this calculation
+                                center.x = rect.width / 2;
+                                center.y = rect.height / 2;
+                                console.log(`🔍 useGraphData - Updated center position:`, center);
+                            }
+                        }
+
+                        // Distribute nodes in a circular pattern around the center
                         const distributedNodes = distributeNodes(
                             topNodes,
                             center,
-                            Math.min(center.x, center.y) * 0.7,
+                            radius,
                             isTransitioning,
                             initialNodePositions
                         );
                         console.log(`🔍 useGraphData - Distributed ${distributedNodes.length} nodes`);
 
+                        // Log the first few nodes to verify positions
+                        distributedNodes.slice(0, 3).forEach((node, i) => {
+                            console.log(`🔍 Node ${i} (${node.title}): Final Position (${node.x.toFixed(0)}, ${node.y.toFixed(0)})`);
+                        });
+
+                        // Set the nodes state with the distributed nodes
                         setNodes(distributedNodes);
                         dataFetchedRef.current = true;
 
