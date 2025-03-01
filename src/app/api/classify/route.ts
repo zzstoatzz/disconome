@@ -27,7 +27,7 @@ async function updateLabelStats(title: string, labels: Label[]) {
       if (existingStats && typeof existingStats === 'object') {
         labelStats = existingStats as LabelStats;
       }
-    } catch (error) {
+    } catch {
       console.log("No existing label stats found, creating new stats");
     }
 
