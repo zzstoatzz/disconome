@@ -1,109 +1,114 @@
-# discono.me
+# Disconome
 
-explore connections between wikipedia articles through an interactive knowledge graph
+A web application for managing entity classifications and storage.
 
-## features
-- 📊 Timeline generation for Wikipedia articles
-- 📈 Most viewed entities leaderboard
-- 🕸️ Dynamic entity graph with auto-categorization
+## Setup
 
+### Prerequisites
 
-## development
+- Node.js (v16+)
+- npm or yarn
+- Supabase account
 
-requires:
-- [Bun](https://bun.sh) installed on your machine
-- A Vercel account (for deployment and Blob storage)
-- OpenAI API key for timeline generation
+### Supabase Setup
 
-the following environment variables in a `.env.local` file:
-```bash
-OPENAI_API_KEY=your_openai_api_key
-BLOB_READ_WRITE_TOKEN=your_vercel_blob_token
+1. Create a new Supabase project at [https://app.supabase.com](https://app.supabase.com)
+2. Once your project is created, go to the SQL Editor
+3. Copy the contents of `supabase-setup.sql` from this repository
+4. Run the SQL script to create the necessary tables and policies
+5. Go to Project Settings > API to get your project URL and anon/public key
+6. Copy these values to your `.env.local` file:
+
+```
+SUPABASE_URL=your_supabase_url_here
+SUPABASE_KEY=your_supabase_anon_key_here
 ```
 
-1. clone the repository:
-```bash
-gh repo clone zzstoatzz/disconome
-cd disconome
-```
+### Fixing Row-Level Security (RLS) Issues
 
+If you encounter errors like `new row violates row-level security policy for table "entities"`, you need to:
+
+1. Go to the Supabase dashboard > SQL Editor
+2. Run one of these SQL commands:
+
+   **Option 1: Create a policy for the service role (recommended)**
+   ```sql
+   CREATE POLICY "Service role bypass RLS"
+   ON entities
+   FOR ALL
+   TO service_role
+   USING (true)
+   WITH CHECK (true);
+   ```
+
+   **Option 2: Temporarily disable RLS completely (development only)**
+   ```sql
+   ALTER TABLE entities DISABLE ROW LEVEL SECURITY;
+   ```
+
+3. After fixing the RLS policy, you can remove any default data by calling:
+   ```
+   POST /api/debug
+   {"action": "removeDefaultData"}
+   ```
+
+### Installation
+
+1. Clone this repository
 2. Install dependencies:
+
 ```bash
-bun install
+npm install
+# or
+yarn install
 ```
 
 3. Start the development server:
+
 ```bash
-bun dev
+npm run dev
+# or
+yarn dev
 ```
 
 4. Open [http://localhost:3000](http://localhost:3000) in your browser
 
+## API Endpoints
 
-# 🚧 under construction 🚧
+### `/api/track-visit`
 
-## routes
-- `/api/lineage` - Generates timeline data for a given topic
-- `/api/track-visit` - Tracks page views and maintains leaderboard
-- `/api/blob` - Handles Vercel Blob storage operations
-- `/api/classify` - Auto-categorizes entities for graph visualization
+- `GET`: Get all entities
+- `POST`: Track a visit to an entity
 
-## stack
-- [Next.js 14](https://nextjs.org/) with App Router
-- [Tailwind CSS](https://tailwindcss.com/) for styling
-- [Vercel Blob Storage](https://vercel.com/docs/storage/vercel-blob) for caching
-- [OpenAI API](https://openai.com/api/) via [Vercel AI SDK](https://sdk.vercel.ai/)
-- [SWR](https://swr.vercel.app/) for data fetching and caching
+### `/api/classify`
 
+- `POST`: Classify an entity based on its extract
 
-<details>
-<summary>dev log</summary>
+### `/api/debug`
 
+- `GET`: Get debug information
+- `POST`: Perform debug actions
 
-### entity graph visualization
-Current state:
-- ✅ Basic force-directed graph with nodes representing viewed entities
-- ✅ Node size scales with view count
-- ✅ Nodes evenly distributed in circular layout
-- ✅ Subtle connection lines with opacity based on combined view count
-- ✅ Efficient classification system with blob storage versioning (v3)
-- ✅ Immediate node rendering with async classification loading
-- ✅ Top 5 most effective categories shown in legend
-- ✅ Responsive category display optimized for mobile
-- ✅ Full dark/light theme support with smooth transitions
-- ✅ Dynamic edge and node colors based on theme
+## Debug Actions
 
-Still needed:
-- [ ] Performance optimization
-  - Consider WebGL renderer for larger graphs
-  - Implement node culling for off-screen elements
-  - Batch classification requests more efficiently
-- [ ] Connection visualization refinement
-  - Add subtle "electricity" effect on connections
-  - Improve hover state transitions
-  - Consider curved edges for better visual flow
-- [ ] Category system improvements
-  - Implement smarter category rotation based on connection strength
-  - Add visual feedback during category cleanup
-  - Consider hierarchical categories for better organization
-- [ ] Mobile interaction refinement
-  - Add touch-friendly node interactions
-  - Improve zoom and pan controls for touch devices
-  - Optimize hover states for touch interfaces
+- `removeEntity`: Remove an entity from the graph
+- `examineClassification`: Examine a classification
+- `listAllClassifications`: List all classifications
+- `resetReclassificationFlags`: Reset reclassification flags
+- `forceCreateClassifications`: Force create classifications for all entities
+- `getGraphState`: Get the current state of the graph
+- `listAllEntities`: List all entities in the database
+- `clearCache`: Clear the cache
+- `checkConstants`: Check constants
 
-Next steps:
-1. Implement WebGL renderer for better performance
-2. Add subtle animation effects to connections
-3. Improve category system with hierarchical organization
-4. Add visual feedback during cleanup operations
-5. Optimize classification batching and caching
-6. Enhance mobile touch interactions
+## Migration from Vercel Blob
 
-Technical debt to address:
-- Clean up old blob storage versions
-- Consolidate shared types and utilities
-- Add error boundaries for graph visualization
-- Improve test coverage for classification system
-- Refactor theme handling for better SSR compatibility
+This project was migrated from Vercel Blob to Supabase for more reliable storage with true deletion capabilities. If you're migrating existing data, you'll need to:
 
-</details>
+1. Export your data from Vercel Blob
+2. Transform it to match the Supabase schema
+3. Import it into your Supabase database
+
+## License
+
+MIT

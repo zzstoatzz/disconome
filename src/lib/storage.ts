@@ -1,32 +1,26 @@
-import { put, list } from "@vercel/blob";
+import { createClient } from '@supabase/supabase-js';
 import { JsonValue, CacheEntry } from "@/lib/types";
 
-// Simple in-memory cache to store blob data for a short time
+// Simple in-memory cache to store data for a short time
 const cache = new Map<string, CacheEntry<JsonValue>>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-// Namespace prefix for all blob keys
-const NAMESPACE = process.env.NODE_ENV === 'production'
-    ? 'dev'
-    : (process.env.BLOB_NAMESPACE || "dev");
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Check if Vercel Blob is properly configured
-const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
-const isBlobConfigured = !!BLOB_READ_WRITE_TOKEN;
+// Check if Supabase is properly configured
+const isSupabaseConfigured = !!supabaseUrl && !!supabaseKey;
 
-console.log(`🔧 Storage - Vercel Blob configuration:`, {
-    namespace: NAMESPACE,
-    isConfigured: isBlobConfigured,
-    hasToken: !!BLOB_READ_WRITE_TOKEN,
+console.log(`🔧 Storage - Supabase configuration:`, {
+    url: supabaseUrl ? '✓ Set' : '✗ Missing',
+    key: supabaseKey ? '✓ Set' : '✗ Missing',
+    isConfigured: isSupabaseConfigured,
 });
 
-if (!isBlobConfigured) {
-    console.warn(`⚠️ Storage - WARNING: Vercel Blob is not properly configured. BLOB_READ_WRITE_TOKEN is missing.`);
-}
-
-// Utility function to build the full namespaced key
-function withNamespace(path: string): string {
-    return NAMESPACE.replace(/\/$/, "") + "/" + path.replace(/^\/*/, "");
+if (!isSupabaseConfigured) {
+    console.warn(`⚠️ Storage - WARNING: Supabase is not properly configured. SUPABASE_URL and/or SUPABASE_KEY are missing.`);
 }
 
 export interface StorageInterface {
@@ -36,256 +30,284 @@ export interface StorageInterface {
     putWithVersion<T extends JsonValue>(path: string, data: T, expectedVersion: string): Promise<boolean>;
     list(prefix?: string): Promise<string[]>;
     delete(path: string): Promise<void>;
+    clearCache(path?: string): number;
+    clearAll(): Promise<void>;
 }
 
-class BlobStorage implements StorageInterface {
+class SupabaseStorage implements StorageInterface {
+    // Table name in Supabase
+    private tableName = 'entities';
+
     async get<T extends JsonValue>(path: string): Promise<T | null> {
-        const key = withNamespace(path);
-        console.log(`📥 Storage - Fetching blob: ${key}`);
+        console.log(`📥 Storage - Fetching data: ${path}`);
 
         // Check cache first
-        const entry = cache.get(key);
+        const entry = cache.get(path);
         if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
-            console.log(`🔄 Storage - Cache hit for ${key}`);
+            console.log(`🔄 Storage - Cache hit for ${path}`);
             return entry.data as T;
         }
 
         try {
-            console.log(`📥 Storage - Listing blobs with prefix: ${key}`);
-            const { blobs } = await list({ prefix: key });
-            console.log(`📥 Storage - Found ${blobs.length} blobs matching prefix: ${key}`);
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('data, version')
+                .eq('path', path)
+                .single();
 
-            if (blobs.length === 0) {
-                console.log(`❌ Storage - Blob not found: ${key}`);
+            if (error) {
+                if (error.code === 'PGRST116') {
+                    // No rows returned - entity doesn't exist
+                    console.log(`❌ Storage - Data not found: ${path}`);
+                    return null;
+                }
+                throw error;
+            }
+
+            if (!data) {
+                console.log(`❌ Storage - Data not found: ${path}`);
                 return null;
             }
 
-            // Sort blobs by uploadedAt to get the latest version
-            const latestBlob = blobs
-                .sort((a, b) => (b.uploadedAt?.getTime() || 0) - (a.uploadedAt?.getTime() || 0))[0];
-
-            console.log(`📥 Storage - Using latest blob: ${latestBlob.pathname} (uploaded: ${latestBlob.uploadedAt})`);
-            console.log(`📥 Storage - Fetching content from URL: ${latestBlob.url}`);
-
-            const response = await fetch(latestBlob.url);
-            if (!response.ok) {
-                console.error(`❌ Storage - HTTP error fetching blob: ${key}, status: ${response.status}`);
-                return null;
-            }
-
-            const data = await response.json();
-            console.log(`📥 Storage - Successfully fetched blob: ${key}`);
-
-            // Check if this is a tombstone (deleted) object
-            if (data && typeof data === 'object' && data.__deleted === true) {
-                console.log(`🗑️ Storage - Blob marked as deleted: ${key}`);
-                return null;
-            }
+            console.log(`📥 Storage - Successfully fetched data: ${path}`);
 
             // Update cache
-            cache.set(key, { data, timestamp: Date.now() });
-            console.log(`💾 Storage - Cached blob: ${key}`);
+            cache.set(path, { 
+                data: data.data, 
+                timestamp: Date.now(),
+                version: data.version
+            });
+            console.log(`💾 Storage - Cached data: ${path}`);
 
-            return data as T;
+            return data.data as T;
         } catch (error) {
-            console.error(`❌ Storage - Error fetching blob: ${key}`, error);
+            console.error(`❌ Storage - Error fetching data: ${path}`, error);
             return null;
         }
     }
 
     async getWithVersion<T extends JsonValue>(path: string): Promise<{ data: T | null; version: string }> {
-        const key = withNamespace(path);
+        console.log(`📥 Storage - Fetching data with version: ${path}`);
 
         // Check cache first
-        const entry = cache.get(key);
+        const entry = cache.get(path);
         if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
-            console.log(`🔄 Storage - Cache hit for ${key}`);
-            return { data: entry.data as T, version: entry.version || "0" };
-        }
-
-        console.log(`📥 Storage - Fetching blob: ${key}`);
-        const { blobs } = await list({ prefix: key });
-        if (blobs.length === 0) {
-            console.log(`❌ Storage - Blob not found: ${key}`);
-            return { data: null, version: "0" };
+            console.log(`🔄 Storage - Cache hit for ${path}`);
+            return { 
+                data: entry.data as T, 
+                version: entry.version || "0" 
+            };
         }
 
         try {
-            const response = await fetch(blobs[0].url);
-            const data = await response.json();
-            const version = blobs[0].uploadedAt?.toISOString() || "0";
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('data, version')
+                .eq('path', path)
+                .single();
 
-            // Check if this is a tombstone (deleted) object
-            if (data && typeof data === 'object' && data.__deleted === true) {
-                console.log(`🗑️ Storage - Blob marked as deleted: ${key}`);
-                return { data: null, version };
+            if (error) {
+                if (error.code === 'PGRST116') {
+                    // No rows returned - entity doesn't exist
+                    return { data: null, version: "0" };
+                }
+                throw error;
+            }
+
+            if (!data) {
+                return { data: null, version: "0" };
             }
 
             // Update cache with version
-            cache.set(key, { data, timestamp: Date.now(), version });
-            console.log(`💾 Storage - Cached blob: ${key} with version ${version}`);
+            cache.set(path, { 
+                data: data.data, 
+                timestamp: Date.now(), 
+                version: data.version 
+            });
+            console.log(`💾 Storage - Cached data: ${path} with version ${data.version}`);
 
-            return { data: data as T, version };
+            return { 
+                data: data.data as T, 
+                version: data.version 
+            };
         } catch (error) {
-            console.error(`❌ Storage - Error fetching blob: ${key}`, error);
+            console.error(`❌ Storage - Error fetching data with version: ${path}`, error);
             return { data: null, version: "0" };
         }
     }
 
     async put<T extends JsonValue>(path: string, data: T): Promise<void> {
-        const key = withNamespace(path);
-        console.log(`📤 Storage - Putting blob: ${key}`);
+        console.log(`📤 Storage - Putting data: ${path}`);
 
         try {
-            // Get existing data first
-            const existingData = await this.get<T>(path);
+            // Generate a new version (timestamp)
+            const version = new Date().toISOString();
 
-            // Merge data if it's an object, otherwise use new data
-            const mergedData = (existingData && typeof existingData === 'object' && typeof data === 'object')
-                ? { ...existingData, ...data }
-                : data;
+            // Use upsert with ON CONFLICT DO UPDATE to handle existing paths
+            const { error } = await supabase
+                .from(this.tableName)
+                .upsert({ 
+                    path, 
+                    data, 
+                    version,
+                    updated_at: new Date()
+                }, {
+                    onConflict: 'path',
+                    ignoreDuplicates: false
+                });
 
-            await put(key, JSON.stringify(mergedData), {
-                access: 'public',
-                addRandomSuffix: false,
-                cacheControlMaxAge: 0, // Disable caching
-                contentType: 'application/json'
-            });
-            console.log(`✅ Storage - Successfully put blob: ${key}`);
+            if (error) throw error;
+
+            console.log(`✅ Storage - Successfully put data: ${path}`);
 
             // Update cache
-            cache.set(key, { data: mergedData, timestamp: Date.now() });
+            cache.set(path, { 
+                data, 
+                timestamp: Date.now(),
+                version
+            });
         } catch (error) {
-            console.error(`❌ Storage - Error putting blob: ${key}`, error);
+            console.error(`❌ Storage - Error putting data: ${path}`, error);
             throw error;
         }
     }
 
     async putWithVersion<T extends JsonValue>(path: string, data: T, expectedVersion: string): Promise<boolean> {
-        const key = withNamespace(path);
-        console.log(`📤 Storage - Putting blob: ${key} with expected version ${expectedVersion}`);
+        console.log(`📤 Storage - Putting data: ${path} with expected version ${expectedVersion}`);
 
         try {
             // Get current version
             const { version: currentVersion } = await this.getWithVersion(path);
 
-            // Version mismatch - someone else updated the file
+            // Version mismatch - someone else updated the data
             if (currentVersion !== expectedVersion) {
-                console.log(`⚠️ Storage - Version mismatch for ${key}: expected ${expectedVersion}, got ${currentVersion}`);
+                console.log(`⚠️ Storage - Version mismatch for ${path}: expected ${expectedVersion}, got ${currentVersion}`);
                 return false;
             }
 
-            // Version matches, safe to update
-            await put(key, JSON.stringify(data), {
-                access: 'public',
-                addRandomSuffix: false
-            });
-
-            // Update cache with new version (use current timestamp as version)
+            // Generate a new version (timestamp)
             const newVersion = new Date().toISOString();
-            cache.set(key, { data, timestamp: Date.now(), version: newVersion });
-            console.log(`💾 Storage - Updated blob: ${key} with new version ${newVersion}`);
+
+            // Version matches, safe to update
+            const { error } = await supabase
+                .from(this.tableName)
+                .upsert({ 
+                    path, 
+                    data, 
+                    version: newVersion,
+                    updated_at: new Date()
+                }, {
+                    onConflict: 'path',
+                    ignoreDuplicates: false
+                });
+
+            if (error) throw error;
+
+            // Update cache with new version
+            cache.set(path, { 
+                data, 
+                timestamp: Date.now(), 
+                version: newVersion 
+            });
+            console.log(`💾 Storage - Updated data: ${path} with new version ${newVersion}`);
 
             return true;
         } catch (error) {
-            console.error(`❌ Storage - Error putting blob: ${key}`, error);
+            console.error(`❌ Storage - Error putting data with version: ${path}`, error);
             throw error;
         }
     }
 
     async list(prefix: string = ""): Promise<string[]> {
-        const key = withNamespace(prefix);
-        console.log(`📋 Storage - Listing blobs with prefix: ${key}`);
+        console.log(`📋 Storage - Listing data with prefix: ${prefix}`);
 
         try {
-            const { blobs } = await list({ prefix: key });
-            console.log(`📋 Storage - Found ${blobs.length} blobs with prefix: ${key}`);
+            const { data, error } = await supabase
+                .from(this.tableName)
+                .select('path')
+                .like('path', `${prefix}%`);
 
-            if (blobs.length === 0) {
-                console.log(`📋 Storage - No blobs found with prefix: ${key}`);
+            if (error) throw error;
+
+            if (!data || data.length === 0) {
+                console.log(`📋 Storage - No data found with prefix: ${prefix}`);
                 return [];
             }
 
-            // Filter out deleted files
-            const filteredBlobs = [];
-            console.log(`📋 Storage - Checking ${blobs.length} blobs for deleted status`);
-
-            for (const blob of blobs) {
-                try {
-                    console.log(`📋 Storage - Checking blob: ${blob.pathname}`);
-                    const response = await fetch(blob.url);
-                    if (!response.ok) {
-                        console.error(`❌ Storage - HTTP error fetching blob: ${blob.pathname}, status: ${response.status}`);
-                        continue;
-                    }
-
-                    const data = await response.json();
-
-                    // Skip files marked as deleted
-                    if (data && typeof data === 'object' && data.__deleted === true) {
-                        console.log(`🗑️ Storage - Skipping deleted blob: ${blob.pathname}`);
-                        continue;
-                    }
-                    
-                    // Skip files marked for re-classification but still include them in the result
-                    // This ensures they're not treated as deleted but can be handled specially
-                    if (data && typeof data === 'object' && data.needsReclassification === true) {
-                        console.log(`🔄 Storage - Found blob marked for re-classification: ${blob.pathname}`);
-                        // We still add it to filteredBlobs so it's included in the result
-                    }
-
-                    filteredBlobs.push(blob);
-                    console.log(`📋 Storage - Added valid blob: ${blob.pathname}`);
-                } catch (error) {
-                    // If we can't read the file, include it anyway
-                    console.error(`⚠️ Storage - Error reading blob: ${blob.pathname}, including it anyway`, error);
-                    filteredBlobs.push(blob);
-                }
-            }
-
-            console.log(`📋 Storage - Filtered to ${filteredBlobs.length} non-deleted blobs`);
-
-            // Strip namespace from results
-            const results = filteredBlobs.map(blob => blob.pathname.replace(new RegExp(`^${NAMESPACE}/`), ""));
-            console.log(`📋 Storage - Returning ${results.length} paths after stripping namespace`);
-
-            return results;
+            const paths = data.map(item => item.path);
+            console.log(`📋 Storage - Found ${paths.length} items with prefix: ${prefix}`);
+            
+            return paths;
         } catch (error) {
-            console.error(`❌ Storage - Error listing blobs: ${key}`, error);
+            console.error(`❌ Storage - Error listing data: ${prefix}`, error);
             return [];
         }
     }
 
     async delete(path: string): Promise<void> {
-        const key = withNamespace(path);
-        console.log(`🗑️ Storage - Deleting blob: ${key}`);
+        console.log(`🗑️ Storage - Deleting data: ${path}`);
 
         try {
-            // Since Vercel Blob doesn't have a direct delete method in the SDK,
-            // we'll mark the file as deleted by overwriting it with a tombstone object
-            await put(key, JSON.stringify({
-                __deleted: true,
-                __deletedAt: new Date().toISOString(),
-                __originalPath: path
-            }), {
-                access: 'public',
-                addRandomSuffix: false,
-                contentType: 'application/json'
-            });
+            const { error } = await supabase
+                .from(this.tableName)
+                .delete()
+                .eq('path', path);
 
-            console.log(`✅ Storage - Successfully marked blob as deleted: ${key}`);
+            if (error) throw error;
+
+            console.log(`✅ Storage - Successfully deleted data: ${path}`);
 
             // Remove from cache
-            cache.delete(key);
+            cache.delete(path);
         } catch (error) {
-            console.error(`❌ Storage - Error marking blob as deleted: ${key}`, error);
+            console.error(`❌ Storage - Error deleting data: ${path}`, error);
+            throw error;
+        }
+    }
+
+    clearCache(path?: string): number {
+        if (path) {
+            const hadKey = cache.has(path);
+            cache.delete(path);
+            console.log(`🧹 Storage - Cleared cache for: ${path}`);
+            return hadKey ? 1 : 0;
+        } else {
+            const size = cache.size;
+            cache.clear();
+            console.log(`🧹 Storage - Cleared entire cache with ${size} entries`);
+            return size;
+        }
+    }
+
+    /**
+     * Clear all data from the database
+     * Use with caution - this will delete all data!
+     */
+    async clearAll(): Promise<void> {
+        console.log(`🧹 Storage - Clearing all data from database`);
+
+        try {
+            // Delete all rows from the table
+            const { error } = await supabase
+                .from(this.tableName)
+                .delete()
+                .neq('id', 0); // This will match all rows
+
+            if (error) throw error;
+
+            // Clear the cache
+            this.clearCache();
+            
+            console.log(`✅ Storage - Successfully cleared all data from database`);
+        } catch (error) {
+            console.error(`❌ Storage - Error clearing all data:`, error);
             throw error;
         }
     }
 }
 
 // Export a singleton instance
-export const storage = new BlobStorage();
+export const storage = new SupabaseStorage();
 
 // Export types for use elsewhere
 export type { CacheEntry, JsonValue };
