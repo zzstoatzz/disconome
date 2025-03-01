@@ -7,7 +7,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Namespace prefix for all blob keys
 const NAMESPACE = process.env.NODE_ENV === 'production'
-    ? 'prod'
+    ? 'dev'
     : (process.env.BLOB_NAMESPACE || "dev");
 
 // Check if Vercel Blob is properly configured
