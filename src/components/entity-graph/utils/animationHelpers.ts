@@ -1,12 +1,4 @@
-import React from 'react';
 import { CSSProperties } from 'react';
-
-// Type for orbital nodes used in the createConnectingLines function
-type OrbitalNodeType = {
-  size: number;
-  color: string;
-  style: React.CSSProperties;
-};
 
 // Inject animation styles for orbital loading and node transitions
 export const injectAnimationStyles = () => {
@@ -68,67 +60,9 @@ export const injectAnimationStyles = () => {
 };
 
 // Create connecting lines between orbital nodes
-export const createConnectingLines = (
-  svgElement: SVGSVGElement,
-  orbitalNodes: OrbitalNodeType[],
-  isDarkTheme: boolean
-) => {
-  if (!svgElement || orbitalNodes.length === 0) return;
-
-  // Clear existing lines
-  const existingLines = svgElement.querySelectorAll('.orbital-connecting-line');
-  existingLines.forEach(line => line.remove());
-
-  // Create a group for the lines if it doesn't exist
-  let linesGroup = svgElement.querySelector('.connecting-lines-group');
-  if (!linesGroup) {
-    linesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    linesGroup.classList.add('connecting-lines-group');
-    svgElement.appendChild(linesGroup);
-  }
-
-  // Create a subset of connections (not all nodes should connect)
-  for (let i = 0; i < orbitalNodes.length; i++) {
-    // Connect to 2-3 other nodes
-    const numConnections = 2 + Math.floor(Math.random());
-
-    for (let j = 0; j < numConnections; j++) {
-      // Create the line element
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.classList.add('orbital-connecting-line');
-
-      // Set attributes
-      line.setAttribute('stroke', isDarkTheme ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.15)');
-      line.setAttribute('stroke-width', '0.5');
-      line.setAttribute('stroke-dasharray', '1,2');
-
-      // Calculate positions based on orbital animation
-      const sourceAngle = Math.random() * Math.PI * 2;
-      const targetAngle = Math.random() * Math.PI * 2;
-      const radius = 50; // Same as in the orbit animation
-
-      const sourceX = Math.cos(sourceAngle) * radius;
-      const sourceY = Math.sin(sourceAngle) * radius;
-      const targetX = Math.cos(targetAngle) * radius;
-      const targetY = Math.sin(targetAngle) * radius;
-
-      line.setAttribute('x1', sourceX.toString());
-      line.setAttribute('y1', sourceY.toString());
-      line.setAttribute('x2', targetX.toString());
-      line.setAttribute('y2', targetY.toString());
-
-      // Add animation
-      const animateElement = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
-      animateElement.setAttribute('attributeName', 'stroke-dashoffset');
-      animateElement.setAttribute('from', '0');
-      animateElement.setAttribute('to', '12');
-      animateElement.setAttribute('dur', '8s');
-      animateElement.setAttribute('repeatCount', 'indefinite');
-
-      line.appendChild(animateElement);
-      linesGroup.appendChild(line);
-    }
-  }
+export const createConnectingLines = () => {
+  // Don't create connecting lines - this is causing the random SVG rendering in the top left
+  return;
 };
 
 // Get node style for animation

@@ -28,13 +28,13 @@ export type Link = {
 export type Edge = {
     source: Node;
     target: Node;
-    sourceX: number;
-    sourceY: number;
-    targetX: number;
-    targetY: number;
+    sourceX?: number;
+    sourceY?: number;
+    targetX?: number;
+    targetY?: number;
     label: Label;
     labels: Label[];
-    strength: number;
+    strength?: number;
 };
 
 export type GraphDimensions = {

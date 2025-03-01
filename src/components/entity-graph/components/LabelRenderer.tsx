@@ -25,7 +25,7 @@ const LabelRenderer: React.FC<LabelRendererProps> = ({
     }
 
     return (
-        <div className="fixed top-0 left-0 right-0 z-20">
+        <div className="fixed top-0 left-0 right-0 z-50">
             <div className="flex flex-col">
                 <div className="p-2 bg-white dark:bg-gray-950 transition-colors duration-200">
                     <div className="max-w-screen-2xl mx-auto">
@@ -91,7 +91,7 @@ const LabelRenderer: React.FC<LabelRendererProps> = ({
                                             <div className="text-xs font-medium">{label.name}</div>
                                             {label.source === 'trending' && (
                                                 <div className="ml-1 opacity-70">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
                                                         <path fillRule="evenodd" d="M15.22 6.268a.75.75 0 01.44.97l-2.47 7.41c-.06.183-.213.308-.398.31a.75.75 0 01-.554-.22l-1.657-1.656-2.829 2.83a.75.75 0 01-1.06-1.061l2.829-2.83-1.656-1.656a.75.75 0 01.22-.554c.001-.185.127-.338.31-.397l7.41-2.47a.75.75 0 01.53.13zm-1.31 1.31l-5.32 1.773 1.178 1.178 1.773 1.774 2.369-4.724z" clipRule="evenodd" />
                                                     </svg>
                                                 </div>
@@ -108,4 +108,4 @@ const LabelRenderer: React.FC<LabelRendererProps> = ({
     );
 };
 
-export default LabelRenderer; 
+export default LabelRenderer;

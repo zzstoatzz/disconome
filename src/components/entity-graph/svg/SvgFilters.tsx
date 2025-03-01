@@ -38,19 +38,31 @@ const SvgFilters: React.FC = () => {
         <filter id="node-shadow" x="-50%" y="-50%" width="200%" height="200%">
             <feDropShadow dx="0" dy="0" stdDeviation="2.5" flood-opacity="0.5" flood-color="${isDarkTheme ? '#ffffff' : '#000000'}" />
         </filter>
+        
+        <filter id="electricity-blur" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="0.8" result="blurred" />
+            <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="noise" seed="0">
+                <animate attributeName="seed" from="0" to="100" dur="1s" repeatCount="indefinite" />
+            </feTurbulence>
+            <feDisplacementMap in="blurred" in2="noise" scale="2" xChannelSelector="R" yChannelSelector="G" />
+            <feMerge>
+                <feMergeNode in="SourceGraphic" />
+            </feMerge>
+        </filter>
 
-        <!-- Simple electricity animation -->
-        <pattern id="electricityPattern" patternUnits="userSpaceOnUse" width="40" height="10" patternTransform="rotate(0)">
+        <!-- Improved electricity animation with crackling effect -->
+        <pattern id="electricityPattern" patternUnits="userSpaceOnUse" width="30" height="6" patternTransform="rotate(0)">
             <animateTransform attributeName="patternTransform" 
                               attributeType="XML" 
                               type="translate" 
                               from="0 0" 
-                              to="40 0" 
-                              dur="0.5s" 
+                              to="30 0" 
+                              dur="0.7s" 
                               repeatCount="indefinite" />
-            <path d="M0,5 L5,0 L10,5 L15,0 L20,5 L25,0 L30,5 L35,0 L40,5" 
-                  stroke="white" 
-                  stroke-width="2" 
+            <path d="M0,3 L2,1 L4,3 L6,0 L8,4 L10,2 L12,3 L14,1 L16,4 L18,0 L20,3 L22,1 L24,4 L26,2 L28,3 L30,1" 
+                  stroke="${isDarkTheme ? 'rgba(180, 220, 255, 0.9)' : 'rgba(100, 180, 255, 0.9)'}" 
+                  stroke-width="1" 
+                  filter="url(#electricity-blur)"
                   fill="none" />
         </pattern>
     `;

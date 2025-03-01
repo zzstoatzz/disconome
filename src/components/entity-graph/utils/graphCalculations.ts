@@ -12,10 +12,14 @@ export const calculateNodeSize = (
     const baseSize = 6 + (count / maxCount) * 12;
     // Use the same slug normalization for size calculation
     const nodeSlug = slug.toLowerCase().replace(/\s+/g, '-');
-    const isTrending = trendingTopics.some(topic => {
+    
+    // Ensure trendingTopics is an array
+    const topicsArray = Array.isArray(trendingTopics) ? trendingTopics : [];
+    const isTrending = topicsArray.some(topic => {
         const topicSlug = topic.name.toLowerCase().replace(/\s+/g, '-');
         return nodeSlug === topicSlug;
     });
+    
     return isTrending ? baseSize * 1.5 : baseSize;
 };
 
@@ -61,10 +65,6 @@ export const calculateEdges = (
                 newEdges.push({
                     source,
                     target,
-                    sourceX: source.x,
-                    sourceY: source.y,
-                    targetX: target.x,
-                    targetY: target.y,
                     labels: edgeLabels,
                     label: hoveredLabel && edgeLabels.some(l => l.name === hoveredLabel.name)
                         ? hoveredLabel
@@ -98,7 +98,7 @@ export const distributeNodes = (
     };
 
     // Ensure radius is valid - use a fixed minimum radius
-    const validRadius = Math.max(isNaN(radius) || radius <= 0 ? 300 : radius, 300);
+    const validRadius = Math.max(isNaN(radius) || radius <= 0 ? 350 : radius, 350);
 
     // Calculate angle step based on number of nodes
     const angleStep = (2 * Math.PI) / nodes.length;
@@ -193,20 +193,21 @@ export const getEdgeStyle = (
 
         const hue = parseInt(categoryColor.match(/hsl\((\d+)/)?.[1] || "210");
 
-        // Make highlighted edges much more visible
+        // Make highlighted edges more elegant with electricity effect
         return {
-            stroke: `hsl(${hue}, 90%, 75%, 1)`,  // Full opacity
-            strokeWidth: 3,                      // Thicker
+            stroke: `hsl(${hue}, 90%, 75%, 0.8)`,  // Slightly reduced opacity
+            strokeWidth: 1.5,                      // Thinner for more elegance
             transition: "all 0.3s ease-in-out",
             strokeLinecap: "round",
+            filter: "url(#glow)",                  // Add subtle glow
         };
     }
 
-    // Make non-highlighted edges more visible too
+    // Make non-highlighted edges more spider web-like
     return {
-        stroke: isDarkTheme ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.2)",  // Higher opacity
-        strokeWidth: 1,                                                           // Thicker
-        strokeDasharray: "3,3",
+        stroke: isDarkTheme ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)",  // Lower opacity
+        strokeWidth: 0.7,                                                           // Much thinner
+        strokeDasharray: "2,3",                                                     // Smaller dashes
         transition: "all 0.3s ease-in-out",
     };
 };

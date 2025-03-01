@@ -1,22 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Node, Edge, Label, GraphDimensions } from '../types';
-import { calculateEdges, distributeNodes, getCenter } from '../utils/graphCalculations';
-import { ClassificationResponse } from "@/lib/api-types";
-import { MAX_VISIBLE_NODES } from "@/app/constants";
+import { Node, Edge, Label } from '../types';
+import { calculateEdges, distributeNodes } from '../utils/graphCalculations';
 
 // Static variable to prevent duplicate fetching in strict mode
 const isDataFetched = { current: false };
 
 export const useGraphData = (
-    containerRef: React.RefObject<HTMLDivElement | null>,
-    dimensions: GraphDimensions,
+    containerRef: React.RefObject<HTMLDivElement>,
+    dimensions: { width: number; height: number },
     hoveredLabel: Label | null,
     isTransitioning: boolean,
     initialNodePositions: { [key: string]: { x: number; y: number } },
     trendingTopics: Label[],
-    setIsInitialLoading: (value: boolean) => void,
-    setIsTransitioning: (value: boolean) => void,
-    setInitialNodePositions: (positions: { [key: string]: { x: number; y: number } }) => void
+    setIsInitialLoading: (value: boolean) => void
 ) => {
     const [nodes, setNodes] = useState<Node[]>([]);
     const [edges, setEdges] = useState<Edge[]>([]);
@@ -34,10 +30,14 @@ export const useGraphData = (
         const baseSize = 10 + (count / maxCount) * 15;
         // Use the same slug normalization for size calculation
         const nodeSlug = slug.toLowerCase().replace(/\s+/g, '-');
-        const isTrending = trendingTopics.some(topic => {
+        
+        // Ensure trendingTopics is an array before using .some()
+        const topicsArray = Array.isArray(trendingTopics) ? trendingTopics : [];
+        const isTrending = topicsArray.some(topic => {
             const topicSlug = topic.name.toLowerCase().replace(/\s+/g, '-');
             return nodeSlug === topicSlug;
         });
+        
         return isTrending ? baseSize * 1.5 : baseSize;
     }, [trendingTopics]);
 
@@ -49,344 +49,155 @@ export const useGraphData = (
         }
     }, [nodes, labelsLoaded]);
 
-    // Restore the fade-in effect for nodes
-    useEffect(() => {
-        if (nodes.length > 0) {
-            setNodesLoaded(true);
+    // Helper function to process entities in batches - defined as a callback
+    const processEntitiesInBatches = useCallback((data: { slug: string; title: string; count: number; labels: { name: string; source: string; }[] }[]) => {
+        console.log(`Processing ${data.length} entities`);
 
-            // Calculate edges immediately when nodes are loaded
-            console.log(`useGraphData: Initial edge calculation for ${nodes.length} nodes`);
-            const initialEdges = calculateEdges(nodes, hoveredLabel);
-            console.log(`useGraphData: Initially calculated ${initialEdges.length} edges`);
-            setEdges(initialEdges);
+        // Process all entities at once
+        const processedNodes = data.map((entity) => {
+            // Calculate proper node size based on count
+            const size = calculateNodeSize(entity.count, data, entity.slug);
 
-            // Instead of immediately hiding the loading screen, start the transition
-            if (isDataFetched.current && !isTransitioning) {
-                setIsTransitioning(true);
+            // Create a node with default position in the center of the viewBox
+            const node: Node = {
+                slug: entity.slug,
+                title: entity.title,
+                count: entity.count,
+                labels: entity.labels ? entity.labels.map(label => ({
+                    name: label.name,
+                    source: label.source === 'trending' ? 'trending' : 'ai' // Ensure source is either 'trending' or 'ai'
+                })) : [],
+                x: 500, // Center of viewBox
+                y: 500, // Center of viewBox
+                size: size, // Use calculated size
+            };
 
-                // Capture initial positions at the center for animation
-                const center = getCenter(containerRef as React.RefObject<HTMLDivElement | null>, dimensions);
-                const positions: { [key: string]: { x: number; y: number } } = {};
+            return node;
+        });
 
-                nodes.forEach((node) => {
-                    positions[node.slug] = {
-                        x: center.x,
-                        y: center.y
-                    };
-                });
+        console.log(`Created ${processedNodes.length} nodes`);
 
-                setInitialNodePositions(positions);
+        // Distribute nodes in a circle
+        const center = { x: 500, y: 500 }; // Center of SVG viewBox
+        const radius = 350; // Reduced radius to prevent overlap with label bar
 
-                // After a shorter delay, complete the loading
-                setTimeout(() => {
-                    setIsInitialLoading(false);
+        // Distribute nodes in a circle
+        const distributedNodes = distributeNodes(
+            processedNodes,
+            center,
+            radius,
+            false, // Not transitioning initially
+            {} // No initial positions
+        );
 
-                    // After the transition completes, reset the transitioning state
-                    // Reduced from 1500ms to 900ms to match the new animation duration
-                    setTimeout(() => {
-                        setIsTransitioning(false);
-                    }, 900);
-                }, 300); // Reduced from 500ms to 300ms for faster start
-            }
-        }
-    }, [nodes, nodesLoaded, isTransitioning, containerRef, dimensions, setIsInitialLoading, setIsTransitioning, setInitialNodePositions, hoveredLabel]);
+        console.log(`Distributed ${distributedNodes.length} nodes`);
 
-    // Update the data fetching effect to handle loading state
-    useEffect(() => {
-        // Prevent duplicate fetches
-        if (dataFetchedRef.current || dataFetchingInProgressRef.current || isDataFetched.current) {
-            console.log("🔄 useGraphData - Skipping fetch, already fetched or in progress");
+        // Set nodes state
+        setNodes(distributedNodes);
+        setNodesLoaded(true);
+
+        // Calculate edges
+        const newEdges = calculateEdges(distributedNodes, null);
+        console.log(`Calculated ${newEdges.length} edges`);
+        setEdges(newEdges);
+
+        // End loading state immediately
+        dataFetchingInProgressRef.current = false;
+        setIsInitialLoading(false);
+        setIsLoading(false);
+        console.log("Loading state ended after processing entities");
+    }, [calculateNodeSize, setNodes, setNodesLoaded, setEdges, setIsInitialLoading, setIsLoading]);
+
+    // Function to fetch and process data
+    const fetchAndProcessData = useCallback(() => {
+        if (dataFetchingInProgressRef.current) {
+            console.log("🚫 useGraphData - Data fetching already in progress, skipping");
             return;
         }
 
         console.log("🚀 useGraphData - Starting data fetch");
         dataFetchingInProgressRef.current = true;
         isDataFetched.current = true;
-        setIsLoading(true);
 
-        // Add a small delay before fetching to ensure loading animation is visible
-        setTimeout(() => {
-            console.log("🔍 useGraphData - Fetching data from /api/track-visit");
-            fetch(`/api/track-visit?_=${Date.now()}`)
-                .then((res) => {
-                    console.log(`🔍 useGraphData - Response status: ${res.status}`);
-                    if (!res.ok) {
-                        throw new Error(`HTTP error! status: ${res.status}`);
-                    }
-                    return res.json();
-                })
-                .then((data) => {
-                    console.log(`🔍 useGraphData - Received data:`, {
-                        isArray: Array.isArray(data),
-                        length: Array.isArray(data) ? data.length : 'N/A',
-                        type: typeof data
+        // Fetch data immediately without delay
+        console.log("🔍 useGraphData - Fetching data from /api/track-visit");
+        fetch(`/api/track-visit?_=${Date.now()}`)
+            .then((res) => {
+                console.log(`🔍 useGraphData - Response status: ${res.status}`);
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                return res.json();
+            })
+            .then((data) => {
+                console.log(`🔍 useGraphData - Received data:`, {
+                    isArray: Array.isArray(data),
+                    length: Array.isArray(data) ? data.length : 'N/A',
+                    type: typeof data
+                });
+
+                // Debug: Log the first few items to check structure
+                if (Array.isArray(data) && data.length > 0) {
+                    console.log("🔍 useGraphData - First data item sample:", {
+                        slug: data[0].slug,
+                        title: data[0].title,
+                        count: data[0].count,
+                        labels: data[0].labels
                     });
+                }
 
-                    // Debug: Log the first few items to check structure
-                    if (Array.isArray(data) && data.length > 0) {
-                        console.log("🔍 useGraphData - First data item sample:", {
-                            slug: data[0].slug,
-                            title: data[0].title,
-                            count: data[0].count,
-                            labels: data[0].labels
-                        });
-                    }
-
-                    if (!data || !Array.isArray(data)) {
-                        console.error("❌ useGraphData - Invalid data format received:", data);
-                        dataFetchingInProgressRef.current = false;
-                        setIsInitialLoading(false);
-                        setIsLoading(false);
-                        return;
-                    }
-
-                    // If no data was returned, create some fallback nodes
-                    if (data.length === 0) {
-                        console.log("⚠️ useGraphData - No data returned from API, using fallback data");
-
-                        // Create fallback data
-                        const fallbackData = [
-                            { slug: "artificial-intelligence", title: "Artificial Intelligence", count: 100, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "machine-learning", title: "Machine Learning", count: 85, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "neural-networks", title: "Neural Networks", count: 70, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "deep-learning", title: "Deep Learning", count: 65, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "natural-language-processing", title: "Natural Language Processing", count: 60, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "computer-vision", title: "Computer Vision", count: 55, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "robotics", title: "Robotics", count: 50, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "data-science", title: "Data Science", count: 45, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "quantum-computing", title: "Quantum Computing", count: 40, labels: [{ name: "Technology", source: "fallback" }] },
-                            { slug: "blockchain", title: "Blockchain", count: 35, labels: [{ name: "Technology", source: "fallback" }] }
-                        ];
-
-                        data = fallbackData;
-                        console.log(`🔍 useGraphData - Using ${data.length} fallback entities`);
-                    }
-
-                    // Process the data to create nodes and links
-                    const uniqueNodes = new Map();
-                    console.log(`🔍 useGraphData - Processing ${data.length} entities`);
-
-                    // First pass: create nodes - process in batches for better performance
-                    const processEntitiesInBatches = (entities: { slug: string; title: string; count: number; labels?: Label[] }[], batchSize = 10) => {
-                        let index = 0;
-                        let validCount = 0;
-                        let invalidCount = 0;
-                        let noLabelsCount = 0;
-
-                        const processNextBatch = () => {
-                            const batch = entities.slice(index, index + batchSize);
-                            index += batchSize;
-                            console.log(`🔍 useGraphData - Processing batch ${Math.ceil(index / batchSize)} of ${Math.ceil(entities.length / batchSize)}`);
-
-                            batch.forEach((entity) => {
-                                // Skip if entity is undefined or doesn't have required properties
-                                if (!entity || !entity.title || !entity.slug) {
-                                    console.log("⚠️ useGraphData - Skipping invalid entity:", entity);
-                                    invalidCount++;
-                                    return;
-                                }
-
-                                // Skip the problematic entity
-                                if (entity.slug === "tyler-the-creator") {
-                                    console.log("⚠️ useGraphData - Skipping known deleted entity:", entity.slug);
-                                    invalidCount++;
-                                    return;
-                                }
-
-                                // Skip entities without labels (likely deleted)
-                                if (!entity.labels || entity.labels.length === 0) {
-                                    console.log("⚠️ useGraphData - Skipping entity without labels:", entity.slug);
-                                    noLabelsCount++;
-                                    return;
-                                }
-
-                                if (!uniqueNodes.has(entity.slug)) {
-                                    uniqueNodes.set(entity.slug, {
-                                        ...entity,
-                                        size: calculateNodeSize(entity.count, data, entity.slug),
-                                        labels: entity.labels || [],
-                                    });
-                                    validCount++;
-                                }
-                            });
-
-                            // If there are more entities to process, schedule the next batch
-                            if (index < entities.length) {
-                                setTimeout(processNextBatch, 0);
-                            } else {
-                                // All entities processed, continue with the rest of the logic
-                                console.log(`🔍 useGraphData - Processed all entities: ${validCount} valid, ${invalidCount} invalid, ${noLabelsCount} without labels`);
-                                finishProcessing();
-                            }
-                        };
-
-                        // Start processing the first batch
-                        processNextBatch();
-                    };
-
-                    const finishProcessing = () => {
-                        // Convert back to array and distribute
-                        const allNodes = Array.from(uniqueNodes.values());
-                        console.log(`🔍 useGraphData - Total unique nodes: ${allNodes.length}`);
-
-                        const topNodes = allNodes
-                            .sort((a, b) => b.count - a.count)
-                            .slice(0, MAX_VISIBLE_NODES);
-                        console.log(`🔍 useGraphData - Selected top ${topNodes.length} nodes`);
-
-                        // Distribute nodes evenly - they'll start at center and animate outward
-                        const center = getCenter(containerRef as React.RefObject<HTMLDivElement | null>, dimensions);
-                        console.log(`🔍 useGraphData - Center position:`, center);
-
-                        // Use a larger radius to ensure nodes are distributed more widely
-                        // Make sure radius is proportional to the container size but with a minimum value
-                        const radius = Math.max(Math.min(center.x, center.y) * 0.8, 350);
-                        console.log(`🔍 useGraphData - Using radius: ${radius}`);
-
-                        // Force dimensions update if they're not set yet
-                        if (dimensions.width <= 0 || dimensions.height <= 0) {
-                            const rect = containerRef.current?.getBoundingClientRect();
-                            if (rect) {
-                                console.log(`🔍 useGraphData - Container has dimensions but not passed to hook:`, {
-                                    width: rect.width,
-                                    height: rect.height
-                                });
-                                // We can't call setDimensions here as it's not passed to this hook
-                                // Just use the rect dimensions directly for this calculation
-                                center.x = rect.width / 2;
-                                center.y = rect.height / 2;
-                                console.log(`🔍 useGraphData - Updated center position:`, center);
-                            }
-                        }
-
-                        // Distribute nodes in a circular pattern around the center
-                        const distributedNodes = distributeNodes(
-                            topNodes,
-                            center,
-                            radius,
-                            isTransitioning,
-                            initialNodePositions
-                        );
-                        console.log(`🔍 useGraphData - Distributed ${distributedNodes.length} nodes`);
-
-                        // Log the first few nodes to verify positions
-                        distributedNodes.slice(0, 3).forEach((node, i) => {
-                            console.log(`🔍 Node ${i} (${node.title}): Final Position (${node.x.toFixed(0)}, ${node.y.toFixed(0)})`);
-                        });
-
-                        // Set the nodes state with the distributed nodes
-                        setNodes(distributedNodes);
-                        dataFetchedRef.current = true;
-
-                        // Only classify nodes that don't have AI-generated labels
-                        const nodesToClassify = distributedNodes.filter(
-                            (node) => !node.labels?.some(label => label.source === 'ai')
-                        );
-
-                        if (nodesToClassify.length > 0) {
-                            console.log(`🔍 useGraphData - Classifying ${nodesToClassify.length} nodes`);
-
-                            // Use Promise.all with a map to create all promises at once
-                            const classificationPromises = nodesToClassify.map((node) =>
-                                // First get Wikipedia data
-                                fetch(`https://en.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=true&titles=${encodeURIComponent(node.title)}&origin=*`)
-                                    .then(res => res.json())
-                                    .then(data => {
-                                        const pages = data.query.pages;
-                                        const pageId = Object.keys(pages)[0];
-                                        const extract = pageId !== "-1" ? pages[pageId].extract : "";
-                                        console.log(`🔍 useGraphData - Got Wikipedia extract for ${node.title}: ${extract ? extract.slice(0, 50) + '...' : 'None'}`);
-
-                                        // Then classify with the extract
-                                        return fetch("/api/classify", {
-                                            method: "POST",
-                                            headers: { "Content-Type": "application/json" },
-                                            body: JSON.stringify({
-                                                title: node.title,
-                                                extract: extract
-                                            }),
-                                        });
-                                    })
-                                    .then((res) => {
-                                        if (!res.ok) {
-                                            throw new Error(`HTTP error! status: ${res.status}`);
-                                        }
-                                        return res.json();
-                                    })
-                                    .then((data: ClassificationResponse) => {
-                                        if (data.error) {
-                                            console.error('❌ useGraphData - Error in classification:', data.error);
-                                            return { labels: [], explanation: '' };
-                                        }
-                                        console.log(`🔍 useGraphData - Classification result:`, {
-                                            labels: data.labels?.map(l => `${l.name} (${l.source})`),
-                                            explanation: data.explanation?.slice(0, 50) + '...'
-                                        });
-
-                                        return {
-                                            labels: data.labels, // Only use AI labels from classification
-                                            explanation: data.explanation || ''
-                                        };
-                                    })
-                                    .catch((error) => {
-                                        console.error('❌ useGraphData - Error classifying node:', error);
-                                        return { labels: [], explanation: '' };
-                                    })
-                            );
-
-                            Promise.all(classificationPromises).then((classifications) => {
-                                console.log(`🔍 useGraphData - Completed ${classifications.length} classifications`);
-
-                                const newClassifications = new Map(
-                                    nodesToClassify.map((node, i) => [
-                                        node.slug,
-                                        {
-                                            labels: classifications[i].labels || [],
-                                            explanation: classifications[i].explanation || ''
-                                        }
-                                    ]),
-                                );
-
-                                const nodesWithLabels = distributedNodes.map((node) => {
-                                    const classification = newClassifications.get(node.slug);
-                                    if (classification) {
-                                        // Keep any existing trending labels
-                                        const existingTrendingLabels = node.labels?.filter(l => l.source === 'trending') || [];
-                                        return {
-                                            ...node,
-                                            labels: [...classification.labels, ...existingTrendingLabels],
-                                            explanation: classification.explanation || node.explanation
-                                        };
-                                    }
-                                    return node;
-                                });
-
-                                console.log(`🔍 useGraphData - Updated nodes with classifications`);
-                                setNodes(nodesWithLabels);
-                                setEdges(calculateEdges(nodesWithLabels, hoveredLabel));
-                                dataFetchingInProgressRef.current = false;
-                            });
-                        } else {
-                            console.log("🔍 useGraphData - No nodes need classification");
-                            setEdges(calculateEdges(distributedNodes, hoveredLabel));
-                            dataFetchingInProgressRef.current = false;
-                        }
-
-                        // Update loading state when processing is complete
-                        setIsLoading(false);
-                    };
-
-                    // Start processing entities in batches
-                    processEntitiesInBatches(data);
-                })
-                .catch(error => {
-                    console.error("❌ useGraphData - Error fetching data:", error);
+                if (!data || !Array.isArray(data)) {
+                    console.error("❌ useGraphData - Invalid data format received:", data);
                     dataFetchingInProgressRef.current = false;
                     setIsInitialLoading(false);
                     setIsLoading(false);
-                });
-        }, 500); // Small delay to ensure loading animation is visible
-    }, [dimensions, hoveredLabel, isTransitioning, initialNodePositions, calculateNodeSize, containerRef, setIsInitialLoading]);
+                    return;
+                }
+
+                // If no data was returned, create some fallback nodes
+                if (data.length === 0) {
+                    console.log("⚠️ useGraphData - No data returned from API, using fallback data");
+
+                    // Create fallback data
+                    const fallbackData = [
+                        { slug: "artificial-intelligence", title: "Artificial Intelligence", count: 100, labels: [{ name: "Technology", source: "fallback" }] },
+                        { slug: "machine-learning", title: "Machine Learning", count: 85, labels: [{ name: "Technology", source: "fallback" }] },
+                        { slug: "neural-networks", title: "Neural Networks", count: 70, labels: [{ name: "Technology", source: "fallback" }] },
+                        { slug: "deep-learning", title: "Deep Learning", count: 65, labels: [{ name: "Technology", source: "fallback" }] },
+                        { slug: "natural-language-processing", title: "Natural Language Processing", count: 60, labels: [{ name: "Technology", source: "fallback" }] }
+                    ];
+                    processEntitiesInBatches(fallbackData);
+                    return;
+                }
+
+                // Process the data immediately
+                processEntitiesInBatches(data);
+            })
+            .catch(error => {
+                console.error("❌ useGraphData - Error fetching data:", error);
+                dataFetchingInProgressRef.current = false;
+                setIsInitialLoading(false);
+                setIsLoading(false);
+            });
+    }, [processEntitiesInBatches, setIsInitialLoading, setIsLoading]);
+
+    // Initial data fetch
+    useEffect(() => {
+        if (dataFetchedRef.current) {
+            console.log("🚫 useGraphData - Data already fetched, skipping");
+            return;
+        }
+
+        fetchAndProcessData();
+
+        // Reset the dataFetchedRef when the component unmounts
+        // This ensures fresh data is fetched when the user returns to the graph
+        return () => {
+            console.log("🔄 useGraphData - Component unmounting, resetting dataFetchedRef");
+            dataFetchedRef.current = false;
+            isDataFetched.current = false;
+        };
+    }, [fetchAndProcessData]);
 
     // Add effect to recalculate edges when nodes are updated or hoveredLabel changes
     useEffect(() => {
@@ -399,10 +210,7 @@ export const useGraphData = (
                 console.log(`useGraphData: Calculated ${newEdges.length} edges`);
                 setEdges(newEdges);
             }, 100);
-
             return () => clearTimeout(timer);
-        } else {
-            console.log("useGraphData: No nodes available for edge calculation");
         }
     }, [nodes, hoveredLabel]);
 
@@ -427,5 +235,44 @@ export const useGraphData = (
             document.removeEventListener("selectRandomNode", handleRandomNode);
     }, [nodes]);
 
-    return { nodes, setNodes, edges, setEdges, isLoading };
+    // Reset the static isDataFetched variable when the user navigates away
+    useEffect(() => {
+        // Listen for navigation events
+        const handleBeforeUnload = () => {
+            console.log("🔄 useGraphData - User navigating away, resetting isDataFetched");
+            isDataFetched.current = false;
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        // Also reset when the component unmounts
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            isDataFetched.current = false;
+        };
+    }, []);
+
+    // Function to refresh data
+    const refreshData = useCallback(() => {
+        console.log("🔄 useGraphData - Manually refreshing data");
+        // Reset the dataFetchedRef to allow fetching again
+        dataFetchedRef.current = false;
+        isDataFetched.current = false;
+        // Trigger a new data fetch
+        setIsLoading(true);
+        // Force re-run of the data fetching effect
+        setTimeout(() => {
+            dataFetchingInProgressRef.current = false;
+        }, 100);
+    }, []);
+
+    return {
+        nodes,
+        edges,
+        setEdges,
+        isLoading,
+        nodesLoaded,
+        labelsLoaded,
+        refreshData // Export the refresh function
+    };
 }; 

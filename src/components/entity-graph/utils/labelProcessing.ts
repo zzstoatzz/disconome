@@ -42,7 +42,7 @@ export const processUniqueLabels = (
                             // If it's a trending topic with nodes but not in current trending topics,
                             // mark it as historical
                             isHistorical: current.source === 'trending' &&
-                                !trendingTopics.some(t => t.name === label.name)
+                                !Array.isArray(trendingTopics) ? false : !trendingTopics.some(t => t.name === label.name)
                         });
                     } else {
                         labelCounts.set(label.name, {

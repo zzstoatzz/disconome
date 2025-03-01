@@ -17,7 +17,6 @@ const EdgeRenderer: React.FC<EdgeRendererProps> = ({
     categoryColors,
     isDarkTheme,
     isTransitioning,
-    isInitialLoading,
 }) => {
     const [hasReceivedEdges, setHasReceivedEdges] = useState(false);
 
@@ -29,15 +28,6 @@ const EdgeRenderer: React.FC<EdgeRendererProps> = ({
         }
     }, [edges, hasReceivedEdges]);
 
-    // Don't render edges during initial loading or transitions
-    if (isInitialLoading) {
-        console.log(`EdgeRenderer: Not rendering edges - initial loading`);
-        return null;
-    }
-
-    // During transitions, still render edges but with a transition effect
-    const transitionClass = isTransitioning ? "opacity-50 transition-opacity duration-900" : "transition-opacity duration-300";
-
     // Don't render if no edges
     if (!edges || edges.length === 0) {
         if (hasReceivedEdges) {
@@ -48,11 +38,26 @@ const EdgeRenderer: React.FC<EdgeRendererProps> = ({
         return null;
     }
 
+    // During transitions, still render edges but with a transition effect
+    const transitionClass = isTransitioning ? "opacity-50 transition-opacity duration-900" : "transition-opacity duration-300";
+
     console.log(`EdgeRenderer: Rendering ${edges.length} edges, transitioning: ${isTransitioning}`);
 
     return (
         <g className={`edges-container ${transitionClass}`}>
             {edges.map((edge, i) => {
+                // Validate edge coordinates
+                const sourceX = typeof edge.source.x === 'number' && !isNaN(edge.source.x) ? edge.source.x : 0;
+                const sourceY = typeof edge.source.y === 'number' && !isNaN(edge.source.y) ? edge.source.y : 0;
+                const targetX = typeof edge.target.x === 'number' && !isNaN(edge.target.x) ? edge.target.x : 0;
+                const targetY = typeof edge.target.y === 'number' && !isNaN(edge.target.y) ? edge.target.y : 0;
+
+                // Skip rendering edges with invalid coordinates
+                if (sourceX === 0 && sourceY === 0 && targetX === 0 && targetY === 0) {
+                    console.warn(`EdgeRenderer: Edge ${i} has invalid coordinates`);
+                    return null;
+                }
+
                 const edgeKey = `edge-${edge.source.slug}-${edge.target.slug}-${i}`;
                 const isHighlighted = hoveredLabel && edge.labels.some(l => l.name === hoveredLabel.name);
 
@@ -60,28 +65,44 @@ const EdgeRenderer: React.FC<EdgeRendererProps> = ({
                     <React.Fragment key={edgeKey}>
                         {/* Base edge */}
                         <line
-                            x1={edge.sourceX}
-                            y1={edge.sourceY}
-                            x2={edge.targetX}
-                            y2={edge.targetY}
+                            x1={sourceX}
+                            y1={sourceY}
+                            x2={targetX}
+                            y2={targetY}
                             style={getEdgeStyle(edge, hoveredLabel, categoryColors, isDarkTheme)}
                             className="transition-all duration-300"
                         />
 
-                        {/* Simple electricity effect for highlighted edges */}
+                        {/* Improved electricity effect for highlighted edges */}
                         {isHighlighted && (
-                            <line
-                                x1={edge.sourceX}
-                                y1={edge.sourceY}
-                                x2={edge.targetX}
-                                y2={edge.targetY}
-                                stroke={`url(#electricityPattern)`}
-                                strokeWidth={4}
-                                strokeLinecap="round"
-                                style={{
-                                    opacity: 0.9
-                                }}
-                            />
+                            <>
+                                <line
+                                    x1={sourceX}
+                                    y1={sourceY}
+                                    x2={targetX}
+                                    y2={targetY}
+                                    stroke={`url(#electricityPattern)`}
+                                    strokeWidth={2}
+                                    strokeLinecap="round"
+                                    style={{
+                                        opacity: 0.7
+                                    }}
+                                />
+                                {/* Additional subtle glow line */}
+                                <line
+                                    x1={sourceX}
+                                    y1={sourceY}
+                                    x2={targetX}
+                                    y2={targetY}
+                                    stroke={isDarkTheme ? "rgba(180, 220, 255, 0.3)" : "rgba(100, 180, 255, 0.3)"}
+                                    strokeWidth={3}
+                                    strokeLinecap="round"
+                                    style={{
+                                        opacity: 0.4,
+                                        filter: "blur(2px)"
+                                    }}
+                                />
+                            </>
                         )}
                     </React.Fragment>
                 );
