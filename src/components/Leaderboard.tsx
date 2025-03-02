@@ -42,25 +42,25 @@ export function Leaderboard() {
   const topEntries = stats.slice(0, 3);
 
   return (
-    <div className="mt-8 sm:mt-12 relative z-10 px-4 sm:px-0 max-w-xs mx-auto overflow-visible">
-      <h2 className="text-lg sm:text-xl font-bold mb-3 sm:mb-4 text-gray-800 dark:text-gray-100 text-center">
+    <div className="mt-4 sm:mt-6 relative z-10 px-2 sm:px-0 max-w-xs mx-auto overflow-visible">
+      <h2 className="text-sm sm:text-base font-bold mb-2 text-gray-800 dark:text-gray-100 text-center">
         most viewed entities
       </h2>
       {isLoading ? (
-        <div className="text-sm text-gray-600 text-center">
+        <div className="text-xs text-gray-600 text-center">
           Loading trending entities...
         </div>
       ) : error ? (
-        <div className="text-sm text-red-600 text-center">
+        <div className="text-xs text-red-600 text-center">
           Error loading trending entities
         </div>
       ) : topEntries.length > 0 ? (
-        <div className="space-y-2 overflow-visible">
+        <div className="space-y-1.5 overflow-visible">
           {topEntries.map((entry, index) => (
             <Link
               key={entry.slug}
               href={`/wiki/${entry.slug}`}
-              className="flex items-center p-2 bg-white/90 dark:bg-gray-800/90 
+              className="flex items-center p-1.5 bg-white/90 dark:bg-gray-800/90 
                        rounded-lg shadow-sm 
                        hover:shadow-md hover:translate-x-0.5
                        active:translate-x-0 active:shadow-sm
@@ -68,28 +68,33 @@ export function Leaderboard() {
                        hover:bg-white/95 dark:hover:bg-gray-800/95"
             >
               <span
-                className="text-base sm:text-lg font-bold text-gray-400 w-6 
-                         group-hover:text-gray-500 transition-colors text-center mr-1.5"
+                className="text-sm font-bold text-gray-400 w-5
+                         group-hover:text-gray-500 transition-colors text-center mr-1"
               >
                 #{index + 1}
               </span>
               <div className="flex-grow min-w-0">
-                <h3 className="font-semibold text-gray-800 dark:text-gray-100 text-xs sm:text-sm truncate">
+                <h3 className="font-semibold text-gray-800 dark:text-gray-100 text-xs truncate">
                   {entry.title}
                 </h3>
-                <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                <p className="text-[10px] text-gray-600 dark:text-gray-400 mt-0.5">
                   {entry.count} views
                 </p>
                 {entry.labels && entry.labels.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {entry.labels.map((label, i) => (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {entry.labels.slice(0, 3).map((label, i) => (
                       <span
                         key={`${entry.slug}-${label.name}-${i}`}
-                        className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+                        className="text-[8px] px-1 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
                       >
                         {label.name}
                       </span>
                     ))}
+                    {entry.labels.length > 3 && (
+                      <span className="text-[8px] text-gray-500 dark:text-gray-400">
+                        +{entry.labels.length - 3}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -97,7 +102,7 @@ export function Leaderboard() {
           ))}
         </div>
       ) : (
-        <div className="text-sm text-gray-600 text-center">
+        <div className="text-xs text-gray-600 text-center">
           No trending entities yet
         </div>
       )}

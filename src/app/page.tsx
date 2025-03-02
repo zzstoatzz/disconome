@@ -84,30 +84,30 @@ function HomeContent() {
 
       <div className="fixed inset-0 flex items-center justify-center pointer-events-none">
         {isContentVisible && (
-          <div className="w-full max-w-md mt-16 transition-opacity duration-300 pointer-events-auto">
-            <div className="flex flex-col items-center gap-12">
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-800 dark:text-gray-100 text-center">
+          <div className="w-full max-w-sm sm:max-w-md mt-8 sm:mt-16 transition-opacity duration-300 pointer-events-auto">
+            <div className="flex flex-col items-center gap-6 sm:gap-8">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-800 dark:text-gray-100 text-center">
                 discono.me
               </h1>
-              <div className="w-full relative backdrop-blur-sm bg-white/90 dark:bg-gray-800/90 p-4 rounded-lg sm:bg-transparent sm:dark:bg-transparent sm:backdrop-blur-none sm:p-0">
+              <div className="w-full relative backdrop-blur-sm bg-white/90 dark:bg-gray-800/90 p-3 rounded-lg sm:bg-transparent sm:dark:bg-transparent sm:backdrop-blur-none sm:p-0">
                 <form ref={formRef} onSubmit={handleSubmit} className="relative">
                   <input
                     type="text"
                     value={query}
                     onChange={handleQueryChange}
                     placeholder="submit a wikipedia page ..."
-                    className="w-full p-4 pr-12 text-sm font-mono border-2 border-gray-200 dark:border-gray-700 
+                    className="w-full p-3 pr-10 text-xs sm:text-sm font-mono border-2 border-gray-200 dark:border-gray-700 
                              rounded-lg focus:outline-none focus:border-gray-400 dark:focus:border-gray-500 
                              focus:ring-0 text-gray-700 dark:text-gray-100 placeholder-gray-400 
                              dark:placeholder-gray-500 bg-white dark:bg-gray-800 shadow-sm
                              transition duration-200 ease-in-out"
                     autoFocus
                   />
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-gray-400">
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-gray-400">
                     {isLoading ? (
                       <LoadingSpinner />
                     ) : (
-                      query && <span className="text-sm">↵</span>
+                      query && <span className="text-xs sm:text-sm">↵</span>
                     )}
                   </div>
                 </form>

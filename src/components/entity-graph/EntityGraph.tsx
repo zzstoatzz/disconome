@@ -65,6 +65,8 @@ const EntityGraph: React.FC = () => {
     // Refs
     const containerRef = useRef<HTMLDivElement>(null) as React.RefObject<HTMLDivElement>;
     const svgRef = useRef<SVGSVGElement>(null);
+    const labelHeightRef = useRef<number>(0);
+    const footerHeightRef = useRef<number>(0);
 
     // State
     const [dimensions, setDimensions] = useState<GraphDimensions>({ width: 0, height: 0 });
@@ -112,6 +114,30 @@ const EntityGraph: React.FC = () => {
     useEffect(() => {
         injectAnimationStyles();
     }, []);
+
+    // Measure label bar and footer heights
+    useEffect(() => {
+        const measureElements = () => {
+            // Measure label bar height
+            const labelBar = document.querySelector('.fixed.top-0.left-0.right-0.z-50');
+            if (labelBar) {
+                labelHeightRef.current = labelBar.getBoundingClientRect().height;
+            }
+
+            // Measure footer height
+            const footer = document.querySelector('footer');
+            if (footer) {
+                footerHeightRef.current = footer.getBoundingClientRect().height;
+            }
+        };
+
+        // Initial measurement
+        measureElements();
+
+        // Re-measure on resize
+        window.addEventListener('resize', measureElements);
+        return () => window.removeEventListener('resize', measureElements);
+    }, [uniqueLabels]); // Re-measure when labels change as this might affect height
 
     // Update dimensions on resize
     useEffect(() => {
@@ -258,7 +284,7 @@ const EntityGraph: React.FC = () => {
                 minHeight: '600px'
             }}
         >
-            {/* SVG Graph - fixed positioning and z-index */}
+            {/* SVG Graph with dynamic positioning */}
             <svg
                 width="100%"
                 height="100%"
@@ -268,12 +294,13 @@ const EntityGraph: React.FC = () => {
                 ref={svgRef}
                 style={{
                     position: 'absolute',
-                    top: '60px', // Add top margin to move the entire SVG down
+                    top: `${labelHeightRef.current}px`, // Dynamic top position based on label height
                     left: 0,
                     right: 0,
-                    bottom: 0,
+                    bottom: `${footerHeightRef.current}px`, // Dynamic bottom position based on footer height
                     overflow: 'visible',
-                    minHeight: '600px'
+                    height: `calc(100% - ${labelHeightRef.current + footerHeightRef.current}px)`, // Dynamic height calculation
+                    minHeight: '400px' // Minimum height to ensure visibility
                 }}
             >
                 <defs>
